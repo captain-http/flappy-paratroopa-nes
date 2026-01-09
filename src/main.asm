@@ -89,11 +89,14 @@ reset:
     lda #$27              ; Yellow (bird color)
     sta PPU_DATA
 
-    ; Initialize bird state
+    ; Initialize bird state (8.8 fixed-point)
+    lda #0
+    sta bird_y_frac
     lda #100
     sta bird_y
     lda #0
-    sta bird_vel
+    sta bird_vel_lo
+    sta bird_vel_hi
 
     ; Setup sprite tiles and attributes (static parts)
     lda #$00              ; Tile 0
@@ -144,16 +147,22 @@ game_loop:
     lda #0
     sta nmi_flag
 
-    ; Apply gravity to velocity
-    lda bird_vel
+    ; Apply gravity to velocity (8.8 fixed-point)
+    lda bird_vel_lo
     clc
-    adc #1                ; Gravity = 1 per frame
-    sta bird_vel
+    adc #GRAVITY
+    sta bird_vel_lo
+    lda bird_vel_hi
+    adc #0                ; Add carry
+    sta bird_vel_hi
 
-    ; Apply velocity to position
-    lda bird_y
+    ; Apply velocity to position (8.8 fixed-point)
+    lda bird_y_frac
     clc
-    adc bird_vel
+    adc bird_vel_lo
+    sta bird_y_frac
+    lda bird_y
+    adc bird_vel_hi
     sta bird_y
 
     ; Check ground collision
@@ -162,7 +171,9 @@ game_loop:
     lda #GROUND_Y         ; Clamp to ground
     sta bird_y
     lda #0                ; Stop falling
-    sta bird_vel
+    sta bird_vel_lo
+    sta bird_vel_hi
+    sta bird_y_frac
 @no_ground:
 
     ; Update sprite Y positions
