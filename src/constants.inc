@@ -7,8 +7,16 @@ bird_vel_lo = $02       ; Bird Y velocity (fractional)
 bird_vel_hi = $03       ; Bird Y velocity (integer, signed)
 nmi_flag    = $04       ; Set by NMI, cleared by main loop
 
+; Controller variables
+buttons     = $05       ; Current button state
+buttons_old = $06       ; Previous frame buttons
+buttons_new = $07       ; Newly pressed this frame
+
 ; Physics (8.8 fixed-point)
 GRAVITY     = $40       ; ~0.25 pixels/frame² (floaty feel)
+FLAP_VEL_LO = $00       ; Flap velocity fractional
+FLAP_VEL_HI = $FC       ; Flap velocity integer (-4 pixels/frame)
 
 ; Screen bounds
+CEILING_Y   = 8         ; Top of screen (bird stops here)
 GROUND_Y    = 200       ; Ground level (bird stops here)

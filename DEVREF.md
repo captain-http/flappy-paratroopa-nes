@@ -69,11 +69,34 @@ Low byte  = fraction (256ths of a pixel)
 
 **Constants:**
 ```
-GRAVITY  = $40    ; ~0.25 pixels/frame² (floaty feel)
-GROUND_Y = 200    ; Invisible ground level
+GRAVITY   = $40   ; ~0.25 pixels/frame² (floaty feel)
+CEILING_Y = 8     ; Top boundary
+GROUND_Y  = 200   ; Bottom boundary
 ```
 
 **Why 8.8:**
 - Smooth movement without jerky pixel jumps
 - Gravity of 1 pixel/frame was too fast
 - Allows fine-tuning physics feel
+
+## Controller Input
+
+**Decision:** Edge detection for flap (new press only, not held).
+
+**Implementation:**
+```
+buttons_new = buttons AND (NOT buttons_old)
+```
+
+This ensures:
+- Holding button doesn't spam flaps
+- Either A or B button works
+- Responsive single-press input
+
+**Constants:**
+```
+FLAP_VEL_LO = $00    ; Fractional part
+FLAP_VEL_HI = $FC    ; -4 in signed 8-bit
+```
+
+Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time creating the characteristic parabolic arc.

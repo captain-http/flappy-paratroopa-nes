@@ -147,6 +147,20 @@ game_loop:
     lda #0
     sta nmi_flag
 
+    ; Read controller
+    jsr read_controller
+
+    ; Check for flap (A or B pressed)
+    lda buttons_new
+    and #(BUTTON_A | BUTTON_B)
+    beq @no_flap
+    ; Flap! Set upward velocity
+    lda #FLAP_VEL_LO
+    sta bird_vel_lo
+    lda #FLAP_VEL_HI
+    sta bird_vel_hi
+@no_flap:
+
     ; Apply gravity to velocity (8.8 fixed-point)
     lda bird_vel_lo
     clc
@@ -165,7 +179,27 @@ game_loop:
     adc bird_vel_hi
     sta bird_y
 
+    ; Check ceiling collision (bird went too high or wrapped)
+    cmp #CEILING_Y
+    bcs @no_ceiling       ; bird_y >= CEILING_Y, check if wrapped
+    ; bird_y < CEILING_Y, clamp to ceiling
+@clamp_ceiling:
+    lda #CEILING_Y
+    sta bird_y
+    lda #0                ; Stop upward velocity
+    sta bird_vel_lo
+    sta bird_vel_hi
+    sta bird_y_frac
+    jmp @no_ground        ; Skip ground check
+@no_ceiling:
+    ; Check if wrapped around (went negative, now 240+)
+    cmp #240
+    bcc @check_ground     ; bird_y < 240, normal range
+    jmp @clamp_ceiling    ; Wrapped, clamp to ceiling
+
+@check_ground:
     ; Check ground collision
+    lda bird_y
     cmp #GROUND_Y
     bcc @no_ground        ; bird_y < GROUND_Y, no collision
     lda #GROUND_Y         ; Clamp to ground
@@ -202,6 +236,37 @@ nmi:
 
 irq:
     rti
+
+;===============================================================================
+; Controller Reading
+;===============================================================================
+read_controller:
+    ; Save previous button state
+    lda buttons
+    sta buttons_old
+
+    ; Strobe controller
+    lda #$01
+    sta $4016
+    lda #$00
+    sta $4016
+
+    ; Read 8 buttons
+    ldx #$08
+@read_loop:
+    lda $4016
+    lsr a               ; Bit 0 -> Carry
+    rol buttons         ; Carry -> buttons
+    dex
+    bne @read_loop
+
+    ; Calculate newly pressed buttons (edge detection)
+    lda buttons_old
+    eor #$FF            ; Invert old state
+    and buttons         ; AND with current = new presses only
+    sta buttons_new
+
+    rts
 
 ;===============================================================================
 ; CHR-ROM
