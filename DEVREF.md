@@ -48,3 +48,32 @@ This color fills the sky. All palettes share this as color 0, so design sprites 
 ```
 
 **Prototype color:** `$27` (yellow)
+
+## Physics: 8.8 Fixed-Point
+
+**Decision:** Use 8.8 fixed-point math for smooth subpixel movement.
+
+**Format:**
+```
+High byte = integer (pixels)
+Low byte  = fraction (256ths of a pixel)
+```
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| bird_y_frac | $00 | Y position fractional |
+| bird_y | $01 | Y position integer |
+| bird_vel_lo | $02 | Velocity fractional |
+| bird_vel_hi | $03 | Velocity integer (signed) |
+
+**Constants:**
+```
+GRAVITY  = $40    ; ~0.25 pixels/frame² (floaty feel)
+GROUND_Y = 200    ; Invisible ground level
+```
+
+**Why 8.8:**
+- Smooth movement without jerky pixel jumps
+- Gravity of 1 pixel/frame was too fast
+- Allows fine-tuning physics feel

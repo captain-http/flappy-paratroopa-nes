@@ -24,13 +24,13 @@ Output: `build/flappy.nes`
 - [x] Basic NES setup — solid color background, proves toolchain works
 - [x] Render static background — fill nametable with sky color
 - [x] Draw a single sprite — a square for the bird, static
-- [ ] Move sprite with controller — D-pad moves bird freely (testing)
+- [ ] ~~Move sprite with controller~~ (skipped - not needed for Flappy Bird)
 
 ### Phase 2: Core Mechanics
-- [ ] Implement gravity — bird falls automatically every frame
+- [x] Implement gravity — bird falls automatically every frame (8.8 fixed-point)
 - [ ] Add flap mechanic — A button gives upward velocity
 - [ ] Add ground — solid row at bottom (visual only)
-- [ ] Ground collision — bird dies when hitting ground
+- [x] Ground collision — bird stops at invisible ground (Y=200)
 
 ### Phase 3: Obstacles
 - [ ] Draw one static pipe pair — top and bottom with gap
