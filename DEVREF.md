@@ -34,3 +34,17 @@ $8010    8KB     CHR-ROM
 **Decision:** Use NES palette color `$21` (light blue) as the universal background.
 
 This color fills the sky. All palettes share this as color 0, so design sprites and tiles accordingly.
+
+## Bird Sprite: 16x16 (4 tiles)
+
+**Decision:** Use 4 tiles arranged 2x2 for the bird.
+
+```
+┌───┬───┐
+│ 0 │ 1 │  Each tile = 8x8
+├───┼───┤  Total = 16x16 pixels
+│ 2 │ 3 │  4 OAM entries needed
+└───┴───┘
+```
+
+**Prototype color:** `$27` (yellow)

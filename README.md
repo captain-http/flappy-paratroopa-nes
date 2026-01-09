@@ -23,7 +23,7 @@ Output: `build/flappy.nes`
 ### Phase 1: Foundation
 - [x] Basic NES setup — solid color background, proves toolchain works
 - [x] Render static background — fill nametable with sky color
-- [ ] Draw a single sprite — a square for the bird, static
+- [x] Draw a single sprite — a square for the bird, static
 - [ ] Move sprite with controller — D-pad moves bird freely (testing)
 
 ### Phase 2: Core Mechanics
