@@ -89,45 +89,29 @@ reset:
     lda #$27              ; Yellow (bird color)
     sta PPU_DATA
 
-    ; Setup bird sprites (4 sprites in 2x2)
-    ; Sprite 0: top-left
-    lda #100              ; Y position
-    sta OAM_BUFFER+0
+    ; Initialize bird state
+    lda #100
+    sta bird_y
+    lda #0
+    sta bird_vel
+
+    ; Setup sprite tiles and attributes (static parts)
     lda #$00              ; Tile 0
     sta OAM_BUFFER+1
+    sta OAM_BUFFER+5
+    sta OAM_BUFFER+9
+    sta OAM_BUFFER+13
     lda #$00              ; Attributes (palette 0)
     sta OAM_BUFFER+2
-    lda #120              ; X position
-    sta OAM_BUFFER+3
-
-    ; Sprite 1: top-right
-    lda #100
-    sta OAM_BUFFER+4
-    lda #$00
-    sta OAM_BUFFER+5
-    lda #$00
     sta OAM_BUFFER+6
-    lda #128              ; X + 8
-    sta OAM_BUFFER+7
-
-    ; Sprite 2: bottom-left
-    lda #108              ; Y + 8
-    sta OAM_BUFFER+8
-    lda #$00
-    sta OAM_BUFFER+9
-    lda #$00
     sta OAM_BUFFER+10
-    lda #120
-    sta OAM_BUFFER+11
-
-    ; Sprite 3: bottom-right
-    lda #108
-    sta OAM_BUFFER+12
-    lda #$00
-    sta OAM_BUFFER+13
-    lda #$00
     sta OAM_BUFFER+14
+    ; X positions (fixed)
+    lda #120
+    sta OAM_BUFFER+3
+    sta OAM_BUFFER+11
     lda #128
+    sta OAM_BUFFER+7
     sta OAM_BUFFER+15
 
     ; Hide remaining sprites
@@ -149,8 +133,38 @@ reset:
     lda #%00011110
     sta PPU_MASK
 
-forever:
-    jmp forever           ; Infinite loop
+;===============================================================================
+; Main Game Loop
+;===============================================================================
+game_loop:
+    ; Wait for NMI
+@wait_nmi:
+    lda nmi_flag
+    beq @wait_nmi
+    lda #0
+    sta nmi_flag
+
+    ; Apply gravity to velocity
+    lda bird_vel
+    clc
+    adc #1                ; Gravity = 1 per frame
+    sta bird_vel
+
+    ; Apply velocity to position
+    lda bird_y
+    clc
+    adc bird_vel
+    sta bird_y
+
+    ; Update sprite Y positions
+    sta OAM_BUFFER+0      ; Top-left
+    sta OAM_BUFFER+4      ; Top-right
+    clc
+    adc #8
+    sta OAM_BUFFER+8      ; Bottom-left
+    sta OAM_BUFFER+12     ; Bottom-right
+
+    jmp game_loop
 
 nmi:
     pha
@@ -159,6 +173,9 @@ nmi:
     sta OAM_ADDR
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
+    ; Signal main loop
+    lda #1
+    sta nmi_flag
     pla
     rti
 
