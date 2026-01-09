@@ -4,3 +4,6 @@
 bird_y      = $00       ; Bird Y position
 bird_vel    = $01       ; Bird Y velocity (signed)
 nmi_flag    = $02       ; Set by NMI, cleared by main loop
+
+; Screen bounds
+GROUND_Y    = 200       ; Ground level (bird stops here)

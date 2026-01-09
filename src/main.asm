@@ -156,7 +156,17 @@ game_loop:
     adc bird_vel
     sta bird_y
 
+    ; Check ground collision
+    cmp #GROUND_Y
+    bcc @no_ground        ; bird_y < GROUND_Y, no collision
+    lda #GROUND_Y         ; Clamp to ground
+    sta bird_y
+    lda #0                ; Stop falling
+    sta bird_vel
+@no_ground:
+
     ; Update sprite Y positions
+    lda bird_y
     sta OAM_BUFFER+0      ; Top-left
     sta OAM_BUFFER+4      ; Top-right
     clc
