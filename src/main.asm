@@ -109,11 +109,11 @@ reset:
     sta OAM_BUFFER+6
     sta OAM_BUFFER+10
     sta OAM_BUFFER+14
-    ; X positions (fixed)
-    lda #120
+    ; X positions (fixed at 1/4 screen width)
+    lda #56
     sta OAM_BUFFER+3
     sta OAM_BUFFER+11
-    lda #128
+    lda #64
     sta OAM_BUFFER+7
     sta OAM_BUFFER+15
 

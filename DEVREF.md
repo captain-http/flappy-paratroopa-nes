@@ -49,6 +49,12 @@ This color fills the sky. All palettes share this as color 0, so design sprites 
 
 **Prototype color:** `$27` (yellow)
 
+**X position:** 56-72 (centered at 1/4 screen width)
+- NES screen width: 256 pixels
+- Bird center: 64 pixels (256 ÷ 4)
+- Left tiles: X=56, Right tiles: X=64
+- Matches original Flappy Bird positioning
+
 ## Physics: 8.8 Fixed-Point
 
 **Decision:** Use 8.8 fixed-point math for smooth subpixel movement.
