@@ -28,3 +28,9 @@ $0000    16B     iNES header
 $0010    32KB    PRG-ROM
 $8010    8KB     CHR-ROM
 ```
+
+## Background Color: $21
+
+**Decision:** Use NES palette color `$21` (light blue) as the universal background.
+
+This color fills the sky. All palettes share this as color 0, so design sprites and tiles accordingly.
