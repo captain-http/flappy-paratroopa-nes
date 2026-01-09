@@ -1,0 +1,26 @@
+# Build artifacts
+build/*
+!build/.gitkeep
+
+# Object files
+*.o
+
+# NES ROM files (during development)
+*.nes
+
+# Debug symbols
+*.sym
+
+# Temporary files
+*~
+*.swp
+*.bak
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
