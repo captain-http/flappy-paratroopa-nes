@@ -789,7 +789,13 @@ game_loop:
     jmp game_loop
 
 nmi:
+    ; Preserve all registers (critical for stability)
     pha
+    txa
+    pha
+    tya
+    pha
+
     ; OAM DMA transfer
     lda #$00
     sta OAM_ADDR
@@ -811,6 +817,12 @@ nmi:
     ; Signal main loop
     lda #1
     sta nmi_flag
+
+    ; Restore all registers
+    pla
+    tay
+    pla
+    tax
     pla
     rti
 
