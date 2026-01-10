@@ -112,6 +112,36 @@ Rows 26-29:  Ground
 
 NES background tiles cannot be flipped, so inverted tiles are stored separately in CHR-ROM.
 
+## Scrolling Pipes
+
+**Decision:** Two pipe slots that alternate between nametables for continuous scrolling.
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| pipe0_col | $0B | Pipe 0 tile column (0-31) |
+| pipe0_gap | $0C | Pipe 0 gap top row (8-16) |
+| pipe0_nt | $0D | Pipe 0 current nametable (0 or 1) |
+| pipe1_col | $0E | Pipe 1 tile column (0-31) |
+| pipe1_gap | $0F | Pipe 1 gap top row (8-16) |
+| pipe1_nt | $10 | Pipe 1 current nametable (0 or 1) |
+| pipe_redraw | $11 | Pipe needing redraw (0=none, 1=pipe0, 2=pipe1) |
+
+**Initial positions:**
+- Pipe 0: NT0, column 16, gap row 12
+- Pipe 1: NT1, column 24, gap row 10
+
+**Scrolling mechanism:**
+1. Each frame, check if any pipe has scrolled off-screen left
+2. When a pipe's right edge (col*8 + 32) passes X=0, mark for redraw
+3. Pipe moves to the OTHER nametable at column 28 (ahead of camera)
+4. New gap height generated randomly (rows 9-16)
+5. NMI handler performs the actual VRAM redraw
+
+**Random gap generation:** 8-bit LFSR with tap polynomial $1D, mapped to gap rows 9-16.
+
+**Collision detection:** Checks both pipes using their current nametable, column, and gap values. Calculates screen X based on scroll position and nametable difference.
+
 ## Bird Sprite: 16x16 (4 tiles)
 
 **Decision:** Use 4 tiles arranged 2x2 for the bird.
