@@ -186,22 +186,28 @@ Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time 
 
 ## Game State
 
-**Decision:** Simple flag-based game state management.
+**Decision:** Three-state machine for game flow.
 
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
-| game_over | $0A | 0 = playing, 1 = game over |
+| game_state | $0A | 0 = playing, 1 = dying, 2 = dead |
 
-**Game over triggers:**
-- Bird touches ground (Y >= GROUND_Y)
-- Bird touches pipe (not yet implemented)
+**States:**
+| State | Value | Behavior |
+|-------|-------|----------|
+| STATE_PLAYING | 0 | Normal gameplay, input + physics + scrolling |
+| STATE_DYING | 1 | No input, gravity only, bird falls |
+| STATE_DEAD | 2 | Fully frozen, waiting for reset |
 
-**Game over behavior:**
-- All input ignored
-- Physics frozen (no gravity, no flapping)
-- Scrolling stopped
-- Bird and screen stay in place
+**Triggers:**
+- Pipe collision → STATE_DYING (bird tumbles down)
+- Ground collision → STATE_DEAD (fully frozen)
+
+**Pipe collision detection:**
+- Calculate pipe X from scroll: `pipe_x = 128 - scroll_x`
+- Check X overlap: bird (56-72) vs pipe (pipe_x to pipe_x+32)
+- Check Y overlap: bird outside gap (Y < 96 or Y > 144)
 
 **Future:** Press Start to reset game.
 

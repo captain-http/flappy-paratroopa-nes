@@ -611,11 +611,18 @@ game_loop:
     lda #0
     sta nmi_flag
 
-    ; Check if game over - skip all game logic
-    lda game_over
-    bne @game_over_state
+    ; Check game state
+    lda game_state
+    cmp #STATE_DEAD
+    bne @not_dead
+    jmp @dead_state           ; Fully frozen
+@not_dead:
+    cmp #STATE_DYING
+    bne @not_dying
+    jmp @dying_state          ; Falling, no input
+@not_dying:
 
-    ; Read controller
+    ; STATE_PLAYING: Normal gameplay
     jsr read_controller
 
     ; Check for flap (A or B pressed)
@@ -628,6 +635,9 @@ game_loop:
     lda #FLAP_VEL_HI
     sta bird_vel_hi
 @no_flap:
+
+    ; Check pipe collision
+    jsr check_pipe_collision
 
     ; Apply gravity to velocity (8.8 fixed-point)
     lda bird_vel_lo
@@ -666,19 +676,19 @@ game_loop:
     jmp @clamp_ceiling    ; Wrapped, clamp to ceiling
 
 @check_ground:
-    ; Check ground collision - triggers game over
+    ; Check ground collision - bird is now dead
     lda bird_y
     cmp #GROUND_Y
     bcc @no_ground        ; bird_y < GROUND_Y, no collision
-    ; Bird hit ground - game over!
+    ; Bird hit ground - dead!
     lda #GROUND_Y         ; Clamp to ground
     sta bird_y
     lda #0                ; Stop falling
     sta bird_vel_lo
     sta bird_vel_hi
     sta bird_y_frac
-    lda #1                ; Set game over flag
-    sta game_over
+    lda #STATE_DEAD       ; Fully dead
+    sta game_state
 @no_ground:
 
     ; Update sprite Y positions
@@ -704,9 +714,53 @@ game_loop:
 @no_scroll:
     jmp game_loop
 
-@game_over_state:
-    ; Game is over - just wait, no input or physics
-    ; Bird stays frozen where it landed
+@dying_state:
+    ; Bird is dying - apply gravity but no input, no scrolling
+    ; Apply gravity to velocity
+    lda bird_vel_lo
+    clc
+    adc #GRAVITY
+    sta bird_vel_lo
+    lda bird_vel_hi
+    adc #0
+    sta bird_vel_hi
+
+    ; Apply velocity to position
+    lda bird_y_frac
+    clc
+    adc bird_vel_lo
+    sta bird_y_frac
+    lda bird_y
+    adc bird_vel_hi
+    sta bird_y
+
+    ; Check ground collision
+    cmp #GROUND_Y
+    bcc @dying_no_ground
+    ; Hit ground - now dead
+    lda #GROUND_Y
+    sta bird_y
+    lda #0
+    sta bird_vel_lo
+    sta bird_vel_hi
+    sta bird_y_frac
+    lda #STATE_DEAD
+    sta game_state
+@dying_no_ground:
+
+    ; Update sprite Y positions
+    lda bird_y
+    sta OAM_BUFFER+0
+    sta OAM_BUFFER+4
+    clc
+    adc #8
+    sta OAM_BUFFER+8
+    sta OAM_BUFFER+12
+
+    jmp game_loop
+
+@dead_state:
+    ; Bird is dead - fully frozen, wait for reset
     jmp game_loop
 
 nmi:
@@ -767,6 +821,84 @@ read_controller:
     and buttons         ; AND with current = new presses only
     sta buttons_new
 
+    rts
+
+;===============================================================================
+; Pipe Collision Detection
+;===============================================================================
+check_pipe_collision:
+    ; Calculate pipe X position based on scroll
+    ; Pipe is at column 16 = pixel 128
+    ; Effective X = (128 - scroll_x) wrapped to 0-255
+    ; But we also need to handle nametable wrap (256-511)
+
+    ; For nametable 0: pipe_x = 128 - scroll_x
+    ; For nametable 1: pipe_x = 128 + 256 - scroll_x = 384 - scroll_x
+
+    lda scroll_nt
+    bne @nt1_pipe
+
+    ; Nametable 0: pipe_x = 128 - scroll_x
+    lda #128
+    sec
+    sbc scroll_x
+    jmp @check_x_overlap
+
+@nt1_pipe:
+    ; Nametable 1: pipe at 128, but we're viewing nt1
+    ; pipe_x = 128 + 256 - scroll_x, but this can be > 255
+    ; Simplified: if scroll_x < 128, pipe is off-screen right (> 255)
+    ;             if scroll_x >= 128, pipe_x = 128 - (scroll_x - 256) = 384 - scroll_x
+    ; Since we can't easily handle >255, check if pipe is visible
+    lda scroll_x
+    cmp #128
+    bcc @no_collision     ; Pipe is off-screen to the right
+    ; pipe_x = 384 - scroll_x = -(scroll_x - 384) = we need 16-bit math
+    ; Simpler: pipe_x = 128 - (scroll_x - 256) but scroll_x < 256
+    ; Actually: when on nt1, the nt0 pipe is at 128 - scroll_x + 256
+    ; If scroll_x = 200, pipe_x = 128 - 200 + 256 = 184
+    sec
+    lda #128
+    sbc scroll_x          ; A = 128 - scroll_x (will be negative/wrapped)
+    ; This gives us the right value due to wrap
+
+@check_x_overlap:
+    ; A = pipe_x (left edge of pipe)
+    ; Check if bird (X=56-72) overlaps pipe (X=pipe_x to pipe_x+32)
+    ; Bird overlaps if: pipe_x < bird_right (72) AND pipe_x + 32 > bird_left (56)
+
+    ; Check: pipe_x >= 72 means no overlap (pipe is to the right)
+    cmp #BIRD_RIGHT
+    bcs @no_collision     ; pipe_x >= 72, no overlap
+
+    ; Check: pipe_x + 32 <= 56 means no overlap (pipe is to the left)
+    ; pipe_x + 32 <= 56 means pipe_x <= 24
+    cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
+    bcc @no_collision     ; pipe_x < 25, pipe is to the left
+
+    ; X overlaps! Now check Y
+    ; Bird must be OUTSIDE the gap to collide
+    ; Gap is Y = 96 to 160 (rows 12-19)
+    ; Bird is 16px tall, so check bird_y and bird_y+16
+
+    ; Collision if: bird_y < GAP_TOP (96) OR bird_y + 16 > GAP_BOTTOM (160)
+    ; Which means: bird_y < 96 OR bird_y > 144
+
+    lda bird_y
+    cmp #GAP_TOP
+    bcc @collision        ; bird_y < 96, hit top pipe
+
+    ; Check bottom: bird_y + 16 > GAP_BOTTOM means bird_y > GAP_BOTTOM - 16
+    cmp #(GAP_BOTTOM - 16)
+    bcs @collision        ; bird_y >= 144, hit bottom pipe
+
+@no_collision:
+    rts
+
+@collision:
+    ; Bird hit pipe - start dying
+    lda #STATE_DYING
+    sta game_state
     rts
 
 ;===============================================================================

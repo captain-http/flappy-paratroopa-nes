@@ -35,7 +35,7 @@ Output: `build/flappy.nes`
 ### Phase 3: Obstacles
 - [x] Draw one static pipe pair — top and bottom pipes with 64px gap
 - [ ] Scroll pipe leftward — pipe moves, wraps when offscreen
-- [ ] Pipe collision detection — game over on touch
+- [x] Pipe collision detection — game over on touch, bird falls
 - [ ] Multiple pipes — 2-3 pipes spaced apart, all scrolling
 
 ### Phase 4: Game Loop

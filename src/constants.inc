@@ -17,7 +17,20 @@ scroll_x    = $08       ; X scroll position (0-255)
 scroll_nt   = $09       ; Nametable select (0 or 1)
 
 ; Game state
-game_over   = $0A       ; 0 = playing, 1 = game over
+game_state  = $0A       ; 0 = playing, 1 = dying, 2 = dead
+
+; Game state constants
+STATE_PLAYING = 0
+STATE_DYING   = 1
+STATE_DEAD    = 2
+
+; Pipe collision constants (based on scroll position)
+PIPE_COL     = 16       ; Pipe at column 16 (pixel X = 128)
+PIPE_WIDTH   = 32       ; Pipe is 4 tiles wide
+GAP_TOP      = 96       ; Top of gap (row 12 * 8)
+GAP_BOTTOM   = 160      ; Bottom of gap (row 20 * 8)
+BIRD_LEFT    = 56       ; Bird left edge X
+BIRD_RIGHT   = 72       ; Bird right edge X (56 + 16)
 
 ; Physics (8.8 fixed-point)
 GRAVITY     = $40       ; ~0.25 pixels/frame² (floaty feel)
