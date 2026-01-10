@@ -19,4 +19,4 @@ FLAP_VEL_HI = $FC       ; Flap velocity integer (-4 pixels/frame)
 
 ; Screen bounds
 CEILING_Y   = 8         ; Top of screen (bird stops here)
-GROUND_Y    = 200       ; Ground level (bird stops here)
+GROUND_Y    = 200       ; Ground level (bird sits on top of visible ground at row 27)

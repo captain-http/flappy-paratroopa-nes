@@ -29,8 +29,8 @@ Output: `build/flappy.nes`
 ### Phase 2: Core Mechanics
 - [x] Implement gravity — bird falls automatically every frame (8.8 fixed-point)
 - [x] Add flap mechanic — A/B button gives upward velocity (-4 px/frame)
-- [ ] Add ground — solid row at bottom (visual only)
-- [x] Ground collision — bird stops at invisible ground (Y=200)
+- [x] Add ground — SMB-style 2x2 tile pattern with external CHR graphics
+- [x] Ground collision — bird stops at ground (Y=200)
 
 ### Phase 3: Obstacles
 - [ ] Draw one static pipe pair — top and bottom with gap

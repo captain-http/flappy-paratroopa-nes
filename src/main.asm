@@ -71,12 +71,22 @@ reset:
     lda #$00
     sta PPU_ADDR          ; PPU address = $3F00
 
-    ; Background palette 0
-    lda #$21              ; Light blue (universal bg)
+    ; Background palette 0 (sky)
+    lda #$22              ; SMB sky blue (universal bg)
     sta PPU_DATA
-    lda #$21
+    lda #$22              ; Color 1 (unused)
     sta PPU_DATA
+    sta PPU_DATA          ; Color 2 (unused)
+    sta PPU_DATA          ; Color 3 (unused)
+
+    ; Background palette 1 (ground)
+    lda #$22              ; Color 0 (mirrors to universal bg)
     sta PPU_DATA
+    lda #$36              ; Color 1 - light orange
+    sta PPU_DATA
+    lda #$17              ; Color 2 - brown
+    sta PPU_DATA
+    lda #$0F              ; Color 3 - black
     sta PPU_DATA
 
     ; Skip to sprite palette 0 ($3F10)
@@ -99,7 +109,7 @@ reset:
     sta bird_vel_hi
 
     ; Setup sprite tiles and attributes (static parts)
-    lda #$00              ; Tile 0
+    lda #$01              ; Tile 1 (bird)
     sta OAM_BUFFER+1
     sta OAM_BUFFER+5
     sta OAM_BUFFER+9
@@ -128,8 +138,100 @@ reset:
     inx
     bne @hide_sprites
 
-    ; Enable NMI and set sprite pattern table to $1000
-    lda #%10001000
+    ; Draw ground in both nametables for scrolling
+    ; Row 27 at $2000 + (27 * 32) = $2360 / $2760
+    ; 2x2 tile pattern: $01/$02 top row, $03/$04 bottom row
+    bit PPU_STATUS        ; Reset PPU latch
+
+    ; Fill nametable 0 ground
+    lda #$23
+    sta PPU_ADDR
+    lda #$60
+    sta PPU_ADDR          ; PPU address = $2360 (row 27)
+    ldx #16               ; 16 pairs per row
+@fill_ground0_row27:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @fill_ground0_row27
+    ldx #16               ; Row 28
+@fill_ground0_row28:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @fill_ground0_row28
+
+    ; Fill nametable 1 ground
+    lda #$27
+    sta PPU_ADDR
+    lda #$60
+    sta PPU_ADDR          ; PPU address = $2760 (row 27)
+    ldx #16
+@fill_ground1_row27:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @fill_ground1_row27
+    ldx #16               ; Row 28
+@fill_ground1_row28:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @fill_ground1_row28
+
+    ; Set attribute tables for ground (palette 1)
+    ; Row 27 in attr row 6 ($23F0), row 28 in attr row 7 ($23F8)
+    lda #$23
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR          ; $23F0 = attribute row 6
+    lda #$50              ; %01010000 = palette 1 for bottom 2x2
+    ldx #8
+@attr0_row6:
+    sta PPU_DATA
+    dex
+    bne @attr0_row6
+    lda #$55              ; %01010101 = palette 1 for all areas
+    ldx #8
+@attr0_row7:
+    sta PPU_DATA
+    dex
+    bne @attr0_row7
+
+    ; Nametable 1 attributes
+    lda #$27
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR          ; $27F0 = attribute row 6
+    lda #$50
+    ldx #8
+@attr1_row6:
+    sta PPU_DATA
+    dex
+    bne @attr1_row6
+    lda #$55
+    ldx #8
+@attr1_row7:
+    sta PPU_DATA
+    dex
+    bne @attr1_row7
+
+    ; Reset scroll position
+    bit PPU_STATUS
+    lda #$00
+    sta PPU_SCROLL
+    sta PPU_SCROLL
+
+    ; Enable NMI, sprites from $0000, background from $1000 (like SMB)
+    lda #%10010000
     sta PPU_CTRL
 
     ; Enable rendering (bg + sprites)
@@ -273,14 +375,7 @@ read_controller:
 ;===============================================================================
 .segment "CHARS"
 
-; Background pattern table ($0000-$0FFF) - empty
-.res $1000
-
-; Sprite pattern table ($1000-$1FFF)
-; Tile 0: Solid block (color 1 = yellow)
-.byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF  ; Bit plane 0 (all pixels on)
-.byte $00,$00,$00,$00,$00,$00,$00,$00  ; Bit plane 1 (all pixels off)
-; Result: all pixels = %01 = color 1
-
-; Fill rest of sprite tiles with zeros
-.res $1000 - 16
+; Include external CHR file (8KB)
+; Bank 0 ($0000-$0FFF): Sprites
+; Bank 1 ($1000-$1FFF): Background
+.incbin "../chr/graphics.chr"

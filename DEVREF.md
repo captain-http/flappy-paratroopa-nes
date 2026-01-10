@@ -29,11 +29,43 @@ $0010    32KB    PRG-ROM
 $8010    8KB     CHR-ROM
 ```
 
-## Background Color: $21
+## Background Color: $22
 
-**Decision:** Use NES palette color `$21` (light blue) as the universal background.
+**Decision:** Use NES palette color `$22` (SMB sky blue) as the universal background.
 
-This color fills the sky. All palettes share this as color 0, so design sprites and tiles accordingly.
+This matches Super Mario Bros. sky color. All palettes share this as color 0.
+
+## CHR-ROM Layout (SMB-style)
+
+**Decision:** Use external CHR file with SMB-style pattern table layout.
+
+```
+Pattern Table 0 ($0000-$0FFF): Sprites
+Pattern Table 1 ($1000-$1FFF): Background
+```
+
+**PPU_CTRL:** `%10010000`
+- Bit 3 = 0: Sprites from $0000
+- Bit 4 = 1: Background from $1000
+
+**External CHR:** `chr/graphics.chr` (8KB, included via `.incbin`)
+
+## Ground Tiles
+
+**Decision:** Use SMB-style 2x2 repeating tile pattern for ground.
+
+```
+Row 27: $01 $02 $01 $02...  (top-left, top-right)
+Row 28: $03 $04 $03 $04...  (bottom-left, bottom-right)
+```
+
+**Palette 1 (ground):** `$22, $36, $17, $0F`
+- $22: Universal bg (mirrored)
+- $36: Light orange
+- $17: Brown
+- $0F: Black
+
+**Nametable:** Both nametables filled for scrolling support.
 
 ## Bird Sprite: 16x16 (4 tiles)
 
