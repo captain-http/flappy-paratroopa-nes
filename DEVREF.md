@@ -76,9 +76,26 @@ Rows 28-29: Repeat pattern
 
 **Tile layout:**
 ```
-Cap row 1:  $05 $06 $07 $08
-Cap row 2:  $09 $0A $0B $0C
-Body:       $0D $0E $0F $10 (repeating)
+Bottom pipe (cap facing up):
+  Cap row 1:  $05 $06 $07 $08
+  Cap row 2:  $09 $0A $0B $0C
+  Body:       $0D $0E $0F $10
+
+Top pipe (cap facing down, inverted):
+  Cap row 1:  $11 $12 $13 $14 (lip edge)
+  Cap row 2:  $15 $16 $17 $18 (under lip)
+  Body:       $19 $1A $1B $1C (inverted shading)
+```
+
+**Pipe pair layout (rows):**
+```
+Rows 0-11:   Top pipe body (inverted)
+Row 12:      Top pipe cap ($15-$18)
+Row 13:      Top pipe cap lip ($11-$14)
+Rows 14-19:  Gap (6 tiles = 48px)
+Rows 20-21:  Bottom pipe cap ($05-$0C)
+Rows 22-25:  Bottom pipe body ($0D-$10)
+Rows 26-29:  Ground
 ```
 
 **Palette 2 (pipes):** `$22, $29, $1A, $0F`
@@ -88,11 +105,10 @@ Body:       $0D $0E $0F $10 (repeating)
 - $0F: Black
 
 **Attribute alignment:**
-- Pipes end at row 25 (before ground at row 26)
-- Attribute row 5 ($23EC): all pipe (palette 2)
-- Attribute row 6 ($23F4): top=pipe, bottom=ground (mixed $5A)
+- Top pipe: attr rows 0-2 all pipe ($AA), row 3 top=pipe/bottom=sky ($0A)
+- Bottom pipe: attr row 5 all pipe ($AA), row 6 top=pipe/bottom=ground ($5A)
 
-This avoids palette conflicts between pipe body and ground by respecting the 4x4 tile attribute granularity.
+NES background tiles cannot be flipped, so inverted tiles are stored separately in CHR-ROM.
 
 ## Bird Sprite: 16x16 (4 tiles)
 

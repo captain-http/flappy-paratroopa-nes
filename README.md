@@ -33,7 +33,7 @@ Output: `build/flappy.nes`
 - [x] Ground collision — bird stops at ground (Y=192)
 
 ### Phase 3: Obstacles
-- [x] Draw one static pipe — bottom pipe rising from ground
+- [x] Draw one static pipe pair — top and bottom pipes with 48px gap
 - [ ] Scroll pipe leftward — pipe moves, wraps when offscreen
 - [ ] Pipe collision detection — game over on touch
 - [ ] Multiple pipes — 2-3 pipes spaced apart, all scrolling
