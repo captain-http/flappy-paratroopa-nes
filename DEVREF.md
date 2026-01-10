@@ -55,8 +55,9 @@ Pattern Table 1 ($1000-$1FFF): Background
 **Decision:** Use SMB-style 2x2 repeating tile pattern for ground.
 
 ```
-Row 27: $01 $02 $01 $02...  (top-left, top-right)
-Row 28: $03 $04 $03 $04...  (bottom-left, bottom-right)
+Rows 26-27: $01 $02 $01 $02...  (top-left, top-right)
+            $03 $04 $03 $04...  (bottom-left, bottom-right)
+Rows 28-29: Repeat pattern
 ```
 
 **Palette 1 (ground):** `$22, $36, $17, $0F`
@@ -65,7 +66,33 @@ Row 28: $03 $04 $03 $04...  (bottom-left, bottom-right)
 - $17: Brown
 - $0F: Black
 
+**Attribute alignment:** Ground starts at row 26 to align with attribute row 6 ($23F0), matching SMB's approach.
+
 **Nametable:** Both nametables filled for scrolling support.
+
+## Pipe Tiles
+
+**Decision:** 4-tile wide pipes with 2-row cap and repeating body.
+
+**Tile layout:**
+```
+Cap row 1:  $05 $06 $07 $08
+Cap row 2:  $09 $0A $0B $0C
+Body:       $0D $0E $0F $10 (repeating)
+```
+
+**Palette 2 (pipes):** `$22, $29, $1A, $0F`
+- $22: Universal bg (mirrored)
+- $29: Light green
+- $1A: Dark green
+- $0F: Black
+
+**Attribute alignment:**
+- Pipes end at row 25 (before ground at row 26)
+- Attribute row 5 ($23EC): all pipe (palette 2)
+- Attribute row 6 ($23F4): top=pipe, bottom=ground (mixed $5A)
+
+This avoids palette conflicts between pipe body and ground by respecting the 4x4 tile attribute granularity.
 
 ## Bird Sprite: 16x16 (4 tiles)
 
@@ -109,7 +136,7 @@ Low byte  = fraction (256ths of a pixel)
 ```
 GRAVITY   = $40   ; ~0.25 pixels/frame² (floaty feel)
 CEILING_Y = 8     ; Top boundary
-GROUND_Y  = 200   ; Bottom boundary
+GROUND_Y  = 192   ; Bottom boundary (bird sits on ground at row 26)
 ```
 
 **Why 8.8:**

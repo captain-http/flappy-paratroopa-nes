@@ -89,6 +89,16 @@ reset:
     lda #$0F              ; Color 3 - black
     sta PPU_DATA
 
+    ; Background palette 2 (pipes)
+    lda #$22              ; Color 0 (mirrors to universal bg)
+    sta PPU_DATA
+    lda #$29              ; Color 1 - light green
+    sta PPU_DATA
+    lda #$1A              ; Color 2 - dark green
+    sta PPU_DATA
+    lda #$0F              ; Color 3 - black
+    sta PPU_DATA
+
     ; Skip to sprite palette 0 ($3F10)
     lda #$3F
     sta PPU_ADDR
@@ -139,90 +149,194 @@ reset:
     bne @hide_sprites
 
     ; Draw ground in both nametables for scrolling
-    ; Row 27 at $2000 + (27 * 32) = $2360 / $2760
+    ; Row 26 at $2000 + (26 * 32) = $2340 / $2740
     ; 2x2 tile pattern: $01/$02 top row, $03/$04 bottom row
+    ; Aligned to attribute row 6 bottom half (like SMB)
     bit PPU_STATUS        ; Reset PPU latch
 
-    ; Fill nametable 0 ground
+    ; Fill nametable 0 ground (rows 26-29)
     lda #$23
     sta PPU_ADDR
-    lda #$60
-    sta PPU_ADDR          ; PPU address = $2360 (row 27)
+    lda #$40
+    sta PPU_ADDR          ; PPU address = $2340 (row 26)
     ldx #16               ; 16 pairs per row
-@fill_ground0_row27:
+@fill_ground0_row26:
     lda #$01
     sta PPU_DATA
     lda #$02
+    sta PPU_DATA
+    dex
+    bne @fill_ground0_row26
+    ldx #16               ; Row 27
+@fill_ground0_row27:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
     sta PPU_DATA
     dex
     bne @fill_ground0_row27
     ldx #16               ; Row 28
 @fill_ground0_row28:
-    lda #$03
-    sta PPU_DATA
-    lda #$04
-    sta PPU_DATA
-    dex
-    bne @fill_ground0_row28
-
-    ; Fill nametable 1 ground
-    lda #$27
-    sta PPU_ADDR
-    lda #$60
-    sta PPU_ADDR          ; PPU address = $2760 (row 27)
-    ldx #16
-@fill_ground1_row27:
     lda #$01
     sta PPU_DATA
     lda #$02
     sta PPU_DATA
     dex
-    bne @fill_ground1_row27
-    ldx #16               ; Row 28
-@fill_ground1_row28:
+    bne @fill_ground0_row28
+    ldx #16               ; Row 29
+@fill_ground0_row29:
     lda #$03
     sta PPU_DATA
     lda #$04
     sta PPU_DATA
     dex
+    bne @fill_ground0_row29
+
+    ; Fill nametable 1 ground (rows 26-29)
+    lda #$27
+    sta PPU_ADDR
+    lda #$40
+    sta PPU_ADDR          ; PPU address = $2740 (row 26)
+    ldx #16
+@fill_ground1_row26:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @fill_ground1_row26
+    ldx #16               ; Row 27
+@fill_ground1_row27:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @fill_ground1_row27
+    ldx #16               ; Row 28
+@fill_ground1_row28:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
     bne @fill_ground1_row28
+    ldx #16               ; Row 29
+@fill_ground1_row29:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @fill_ground1_row29
 
     ; Set attribute tables for ground (palette 1)
-    ; Row 27 in attr row 6 ($23F0), row 28 in attr row 7 ($23F8)
+    ; Ground at rows 26-29 = attr row 6 and 7
+    ; $23F0 = attribute row 6, $23F8 = attribute row 7
     lda #$23
     sta PPU_ADDR
     lda #$F0
     sta PPU_ADDR          ; $23F0 = attribute row 6
-    lda #$50              ; %01010000 = palette 1 for bottom 2x2
-    ldx #8
-@attr0_row6:
+    lda #$55              ; %01010101 = palette 1 for all
+    ldx #16               ; 8 bytes row 6 + 8 bytes row 7
+@attr0_ground:
     sta PPU_DATA
     dex
-    bne @attr0_row6
-    lda #$55              ; %01010101 = palette 1 for all areas
-    ldx #8
-@attr0_row7:
-    sta PPU_DATA
-    dex
-    bne @attr0_row7
+    bne @attr0_ground
 
     ; Nametable 1 attributes
     lda #$27
     sta PPU_ADDR
     lda #$F0
     sta PPU_ADDR          ; $27F0 = attribute row 6
-    lda #$50
-    ldx #8
-@attr1_row6:
-    sta PPU_DATA
-    dex
-    bne @attr1_row6
     lda #$55
-    ldx #8
-@attr1_row7:
+    ldx #16               ; 8 bytes row 6 + 8 bytes row 7
+@attr1_ground:
     sta PPU_DATA
     dex
-    bne @attr1_row7
+    bne @attr1_ground
+
+    ; Draw static test pipe from floor at column 16
+    ; Pipe tiles: $05-$08 cap row1, $09-$0C cap row2, $0D-$10 body
+    ; Cap at rows 20-21, body at rows 22-25 (ends before ground)
+
+    ; Pipe cap (rows 20-21)
+    lda #$22              ; $2000 + 20*32 + 16 = $2290
+    sta PPU_ADDR
+    lda #$90
+    sta PPU_ADDR
+    lda #$05
+    sta PPU_DATA
+    lda #$06
+    sta PPU_DATA
+    lda #$07
+    sta PPU_DATA
+    lda #$08
+    sta PPU_DATA
+
+    lda #$22              ; $2000 + 21*32 + 16 = $22B0
+    sta PPU_ADDR
+    lda #$B0
+    sta PPU_ADDR
+    lda #$09
+    sta PPU_DATA
+    lda #$0A
+    sta PPU_DATA
+    lda #$0B
+    sta PPU_DATA
+    lda #$0C
+    sta PPU_DATA
+
+    ; Pipe body (rows 22-25)
+    ldx #22               ; Row counter
+@pipe_body:
+    ; Calculate high byte: $20 + (row / 8)
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc #$20              ; A = $20 + (row / 8)
+    sta PPU_ADDR
+    ; Calculate low byte: ((row & 7) * 32) + column
+    txa
+    and #$07              ; A = row & 7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc #16               ; + column 16
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    inx
+    cpx #26               ; End at row 25 (before ground at row 26)
+    bne @pipe_body
+
+    ; Set attributes for pipe area (palette 2)
+    ; Pipe at columns 16-19 is in attribute column 4
+    ; Attr row 5 (tile rows 20-23): all pipe = $AA
+    ; Attr row 6 (tile rows 24-27): top=pipe, bottom=ground = $5A
+    lda #$23
+    sta PPU_ADDR
+    lda #$EC              ; Attribute row 5, column 4
+    sta PPU_ADDR
+    lda #$AA              ; %10101010 = palette 2 for all quadrants
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$F4              ; Attribute row 6, column 4
+    sta PPU_ADDR
+    lda #$5A              ; %01011010 = top palette 2, bottom palette 1
+    sta PPU_DATA
 
     ; Reset scroll position
     bit PPU_STATUS
