@@ -138,3 +138,23 @@ FLAP_VEL_HI = $FC    ; -4 in signed 8-bit
 ```
 
 Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time creating the characteristic parabolic arc.
+
+## Scrolling
+
+**Decision:** Horizontal scrolling active only when bird is flying.
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| scroll_x | $08 | X scroll position (0-255) |
+| scroll_nt | $09 | Nametable select (0 or 1) |
+
+**Logic:**
+- Bird on ground (Y = GROUND_Y): no scrolling
+- Bird flying: scroll 1 pixel/frame
+- When scroll_x wraps 255→0, toggle scroll_nt
+
+**Implementation:**
+- Scroll updated in main game loop
+- PPU_SCROLL and PPU_CTRL set in NMI handler (after OAM DMA)
+- Both nametables pre-filled with ground tiles for seamless wrap

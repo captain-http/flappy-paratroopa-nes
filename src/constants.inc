@@ -12,6 +12,10 @@ buttons     = $05       ; Current button state
 buttons_old = $06       ; Previous frame buttons
 buttons_new = $07       ; Newly pressed this frame
 
+; Scroll variables
+scroll_x    = $08       ; X scroll position (0-255)
+scroll_nt   = $09       ; Nametable select (0 or 1)
+
 ; Physics (8.8 fixed-point)
 GRAVITY     = $40       ; ~0.25 pixels/frame² (floaty feel)
 FLAP_VEL_LO = $00       ; Flap velocity fractional

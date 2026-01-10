@@ -321,6 +321,19 @@ game_loop:
     sta OAM_BUFFER+8      ; Bottom-left
     sta OAM_BUFFER+12     ; Bottom-right
 
+    ; Scroll if bird is flying (not on ground)
+    lda bird_y
+    cmp #GROUND_Y
+    beq @no_scroll        ; Bird on ground, don't scroll
+    ; Bird is flying, scroll by 1 pixel
+    inc scroll_x
+    bne @no_scroll        ; No overflow, done
+    ; scroll_x wrapped from 255 to 0, toggle nametable
+    lda scroll_nt
+    eor #$01              ; Toggle bit 0
+    sta scroll_nt
+@no_scroll:
+
     jmp game_loop
 
 nmi:
@@ -330,6 +343,19 @@ nmi:
     sta OAM_ADDR
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
+
+    ; Set scroll position
+    bit PPU_STATUS        ; Reset PPU latch
+    lda scroll_x
+    sta PPU_SCROLL        ; X scroll
+    lda #$00
+    sta PPU_SCROLL        ; Y scroll (always 0)
+
+    ; Set PPU_CTRL with nametable select
+    lda #%10010000        ; Base: NMI on, sprites $0000, bg $1000
+    ora scroll_nt         ; Add nametable bit
+    sta PPU_CTRL
+
     ; Signal main loop
     lda #1
     sta nmi_flag
