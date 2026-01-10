@@ -118,6 +118,15 @@ reset:
     sta bird_vel_lo
     sta bird_vel_hi
 
+    ; Initialize sprite Y positions from bird_y
+    lda bird_y
+    sta OAM_BUFFER+0      ; Top-left Y
+    sta OAM_BUFFER+4      ; Top-right Y
+    clc
+    adc #8
+    sta OAM_BUFFER+8      ; Bottom-left Y
+    sta OAM_BUFFER+12     ; Bottom-right Y
+
     ; Setup sprite tiles and attributes (static parts)
     lda #$01              ; Tile 1 (bird)
     sta OAM_BUFFER+1
@@ -621,6 +630,10 @@ game_loop:
     bne @not_dying
     jmp @dying_state          ; Falling, no input
 @not_dying:
+    cmp #STATE_WAITING
+    bne @not_waiting
+    jmp @waiting_state        ; Waiting for start
+@not_waiting:
 
     ; STATE_PLAYING: Normal gameplay
     jsr read_controller
@@ -761,6 +774,18 @@ game_loop:
 
 @dead_state:
     ; Bird is dead - fully frozen, wait for reset
+    jmp game_loop
+
+@waiting_state:
+    ; Waiting for player to press A or B to start
+    jsr read_controller
+    lda buttons_new
+    and #(BUTTON_A | BUTTON_B)
+    beq @waiting_done         ; No button pressed, keep waiting
+    ; Button pressed - start the game!
+    lda #STATE_PLAYING
+    sta game_state
+@waiting_done:
     jmp game_loop
 
 nmi:

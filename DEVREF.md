@@ -186,21 +186,23 @@ Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time 
 
 ## Game State
 
-**Decision:** Three-state machine for game flow.
+**Decision:** Four-state machine for game flow.
 
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
-| game_state | $0A | 0 = playing, 1 = dying, 2 = dead |
+| game_state | $0A | 0 = waiting, 1 = playing, 2 = dying, 3 = dead |
 
 **States:**
 | State | Value | Behavior |
 |-------|-------|----------|
-| STATE_PLAYING | 0 | Normal gameplay, input + physics + scrolling |
-| STATE_DYING | 1 | No input, gravity only, bird falls |
-| STATE_DEAD | 2 | Fully frozen, waiting for reset |
+| STATE_WAITING | 0 | Bird visible, waiting for A/B to start |
+| STATE_PLAYING | 1 | Normal gameplay, input + physics + scrolling |
+| STATE_DYING | 2 | No input, gravity only, bird falls |
+| STATE_DEAD | 3 | Fully frozen, waiting for reset |
 
 **Triggers:**
+- A/B button press in WAITING → STATE_PLAYING (game starts)
 - Pipe collision → STATE_DYING (bird tumbles down)
 - Ground collision → STATE_DEAD (fully frozen)
 

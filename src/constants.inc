@@ -17,12 +17,13 @@ scroll_x    = $08       ; X scroll position (0-255)
 scroll_nt   = $09       ; Nametable select (0 or 1)
 
 ; Game state
-game_state  = $0A       ; 0 = playing, 1 = dying, 2 = dead
+game_state  = $0A       ; 0 = waiting, 1 = playing, 2 = dying, 3 = dead
 
 ; Game state constants
-STATE_PLAYING = 0
-STATE_DYING   = 1
-STATE_DEAD    = 2
+STATE_WAITING = 0       ; Waiting for player to press A/B
+STATE_PLAYING = 1
+STATE_DYING   = 2
+STATE_DEAD    = 3
 
 ; Pipe collision constants (based on scroll position)
 PIPE_COL     = 16       ; Pipe at column 16 (pixel X = 128)
