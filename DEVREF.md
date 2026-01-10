@@ -232,3 +232,37 @@ Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time 
 - Scroll updated in main game loop
 - PPU_SCROLL and PPU_CTRL set in NMI handler (after OAM DMA)
 - Both nametables pre-filled with ground tiles for seamless wrap
+
+## NMI Handler
+
+**Decision:** Minimal NMI handler with full register preservation.
+
+**Register preservation:**
+```asm
+nmi:
+    pha         ; Save A
+    txa
+    pha         ; Save X
+    tya
+    pha         ; Save Y
+    ; ... handler code ...
+    pla
+    tay         ; Restore Y
+    pla
+    tax         ; Restore X
+    pla         ; Restore A
+    rti
+```
+
+**Why preserve all registers:**
+- NMI can fire at any point during the game loop
+- If game loop code is using X or Y when NMI fires, those values would be corrupted
+- Critical for stability - prevents random glitchy behavior
+
+**NMI responsibilities (in order):**
+1. OAM DMA transfer (~513 cycles)
+2. Set PPU_SCROLL (X and Y)
+3. Set PPU_CTRL with nametable select
+4. Signal main loop via `nmi_flag`
+
+**Cycle budget:** ~560 cycles total (well under ~2273 VBlank budget)
