@@ -140,31 +140,35 @@ Spacing: 384 - 256 = 128 pixels
 
 ## Pipe Redraw on Scroll Loop
 
-**Decision:** Redraw pipes dynamically when scrolling loops back to the empty nametable.
+**Decision:** Redraw pipes dynamically when the off-screen nametable needs to be prepared.
 
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
 | pipe_redraw | $0B | Nametable to redraw (0, 1, or $FF=none) |
-| first_loop | $0C | Set to 1 after first full scroll |
 
 **Mechanism:**
 1. Initial state: NT0 empty, NT1 has both pipes
 2. When scroll_x wraps (255→0), toggle scroll_nt
-3. If switching to NT0 AND first_loop=1, queue NT0 for pipe redraw
-4. If switching to NT1, set first_loop=1 (mark first scroll complete)
+3. When switching TO NT1: NT0 just scrolled off-screen, queue NT0 for redraw
+4. When switching TO NT0: Do nothing (NT1 keeps its pipes from init)
 5. NMI handler checks pipe_redraw and calls draw_pipes_in_nt if needed
 
-**Why skip first loop:**
-- NT0 starts empty intentionally (clean start screen)
-- Only redraw after player has scrolled through once
-- first_loop flag prevents redrawing NT0 on initial scroll
+**Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view.
 
-**NMI timing:**
+**Timing:**
+```
+NT0 (empty) visible → scroll → switch to NT1 → queue NT0 redraw
+NT1 (pipes) visible → NT0 redrawn during vblank → scroll → switch to NT0
+NT0 (now has pipes) visible → scroll → switch to NT1 → queue NT0 redraw
+... continues seamlessly
+```
+
+**NMI cycle budget:**
 - Pipe redraw uses ~1000 VRAM write cycles
 - VBlank budget: ~2273 cycles
 - After OAM DMA (~513 cycles), ~1760 cycles remain
-- Pipe redraw fits within single VBlank
+- Pipe redraw fits comfortably within single VBlank
 
 ## Bird Sprite: 16x16 (4 tiles)
 

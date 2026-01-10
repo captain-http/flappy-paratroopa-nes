@@ -21,7 +21,6 @@ game_state  = $0A       ; 0 = waiting, 1 = playing, 2 = dying, 3 = dead
 
 ; Pipe redraw variables
 pipe_redraw = $0B       ; Nametable to redraw pipes in (0, 1, or $FF=none)
-first_loop  = $0C       ; Set to 1 after first full scroll (skip initial NT0)
 
 ; Game state constants
 STATE_WAITING = 0       ; Waiting for player to press A/B

@@ -121,8 +121,6 @@ reset:
     ; Initialize pipe redraw state
     lda #$FF
     sta pipe_redraw       ; $FF = no redraw needed
-    lda #0
-    sta first_loop        ; 0 = haven't completed first loop yet
 
     ; Initialize sprite Y positions from bird_y
     lda bird_y
@@ -729,17 +727,13 @@ game_loop:
     eor #$01              ; Toggle bit 0
     sta scroll_nt
     ; Check if we need to queue pipe redraw
-    bne @switched_to_nt1
-    ; Switched to NT0 - redraw pipes if not first loop
-    lda first_loop
-    beq @no_scroll        ; First loop, NT0 starts empty
+    ; When switching TO NT1, NT0 just went off-screen - queue it for redraw
+    ; This ensures NT0 has pipes ready for next time it becomes visible
+    ; When switching TO NT0, NT1 keeps its pipes from init
+    beq @no_scroll
+    ; Switched to NT1 - NT0 just went off-screen, queue redraw
     lda #0
     sta pipe_redraw       ; Queue NT0 for pipe redraw
-    jmp @no_scroll
-@switched_to_nt1:
-    ; Switched to NT1 - mark first loop complete
-    lda #1
-    sta first_loop
 @no_scroll:
     jmp game_loop
 
