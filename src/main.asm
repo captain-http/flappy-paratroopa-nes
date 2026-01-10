@@ -265,11 +265,11 @@ reset:
     dex
     bne @attr1_ground
 
-    ; Draw static test pipe pair at column 16
+    ; Draw pipe 0 at column 28 (near right edge, appears after scrolling starts)
     ; Pipe tiles: $05-$08 cap row1, $09-$0C cap row2, $0D-$10 body
-    ; Gap between pipes: rows 14-19 (6 tiles = 48 pixels)
+    ; Gap between pipes: rows 12-19 (8 tiles = 64 pixels)
     ;
-    ; Top pipe: body rows 4-13 (hanging from ceiling)
+    ; Top pipe: body rows 0-9, cap rows 10-11
     ; Bottom pipe: cap rows 20-21, body rows 22-25
 
     ; Top pipe body (rows 0-9) using inverted body tiles
@@ -292,7 +292,7 @@ reset:
     asl a
     asl a                 ; A = (row & 7) * 32
     clc
-    adc #16               ; + column 16
+    adc #28               ; + column 28
     sta PPU_ADDR
     lda #$19              ; Inverted body tiles
     sta PPU_DATA
@@ -307,9 +307,9 @@ reset:
     bne @pipe_top
 
     ; Top pipe cap (rows 10-11) using inverted cap tiles
-    lda #$21              ; $2000 + 10*32 + 16 = $2140 + $10 = $2150
+    lda #$21              ; $2000 + 10*32 + 28 = $215C
     sta PPU_ADDR
-    lda #$50
+    lda #$5C
     sta PPU_ADDR
     lda #$15              ; Inverted cap row 1 (under lip)
     sta PPU_DATA
@@ -320,9 +320,9 @@ reset:
     lda #$18
     sta PPU_DATA
 
-    lda #$21              ; $2000 + 11*32 + 16 = $2160 + $10 = $2170
+    lda #$21              ; $2000 + 11*32 + 28 = $217C
     sta PPU_ADDR
-    lda #$70
+    lda #$7C
     sta PPU_ADDR
     lda #$11              ; Inverted cap row 2 (lip edge)
     sta PPU_DATA
@@ -334,9 +334,9 @@ reset:
     sta PPU_DATA
 
     ; Bottom pipe cap (rows 20-21)
-    lda #$22              ; $2000 + 20*32 + 16 = $2290
+    lda #$22              ; $2000 + 20*32 + 28 = $229C
     sta PPU_ADDR
-    lda #$90
+    lda #$9C
     sta PPU_ADDR
     lda #$05
     sta PPU_DATA
@@ -347,9 +347,9 @@ reset:
     lda #$08
     sta PPU_DATA
 
-    lda #$22              ; $2000 + 21*32 + 16 = $22B0
+    lda #$22              ; $2000 + 21*32 + 28 = $22BC
     sta PPU_ADDR
-    lda #$B0
+    lda #$BC
     sta PPU_ADDR
     lda #$09
     sta PPU_DATA
@@ -380,7 +380,7 @@ reset:
     asl a
     asl a                 ; A = (row & 7) * 32
     clc
-    adc #16               ; + column 16
+    adc #28               ; + column 28
     sta PPU_ADDR
     lda #$0D
     sta PPU_DATA
@@ -395,7 +395,7 @@ reset:
     bne @pipe_body
 
     ; Set attributes for pipe area (palette 2)
-    ; Pipe at columns 16-19 is in attribute column 4
+    ; Pipe at columns 28-31 is in attribute column 7
     ;
     ; Top pipe attributes:
     ; Attr row 0 (tile rows 0-3): all pipe = $AA
@@ -404,19 +404,19 @@ reset:
     ; Attr row 3 (tile rows 12-15): all gap = $00
     lda #$23
     sta PPU_ADDR
-    lda #$C4              ; Attribute row 0, column 4
+    lda #$C7              ; Attribute row 0, column 7
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$23
     sta PPU_ADDR
-    lda #$CC              ; Attribute row 1, column 4
+    lda #$CF              ; Attribute row 1, column 7
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$23
     sta PPU_ADDR
-    lda #$D4              ; Attribute row 2, column 4
+    lda #$D7              ; Attribute row 2, column 7
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
@@ -426,18 +426,18 @@ reset:
     ; Attr row 6 (tile rows 24-27): top=pipe, bottom=ground = $5A
     lda #$23
     sta PPU_ADDR
-    lda #$EC              ; Attribute row 5, column 4
+    lda #$EF              ; Attribute row 5, column 7
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$23
     sta PPU_ADDR
-    lda #$F4              ; Attribute row 6, column 4
+    lda #$F7              ; Attribute row 6, column 7
     sta PPU_ADDR
     lda #$5A              ; %01011010 = top palette 2, bottom palette 1
     sta PPU_DATA
 
-    ; Draw second pipe pair in nametable 1 at column 0 (128px spacing from pipe 0)
+    ; Draw pipe 1 in nametable 1 at column 12 (128px spacing from pipe 0)
 
     ; Top pipe body (rows 0-9) using inverted body tiles
     ldx #0                ; Row counter (start from ceiling)
@@ -458,7 +458,8 @@ reset:
     asl a
     asl a
     asl a                 ; A = (row & 7) * 32
-    ; Column 0, no addition needed
+    clc
+    adc #12               ; + column 12
     sta PPU_ADDR
     lda #$19              ; Inverted body tiles
     sta PPU_DATA
@@ -473,9 +474,9 @@ reset:
     bne @pipe_top2
 
     ; Top pipe cap (rows 10-11) using inverted cap tiles
-    lda #$25              ; $2400 + 10*32 + 0 = $2540
+    lda #$25              ; $2400 + 10*32 + 12 = $254C
     sta PPU_ADDR
-    lda #$40
+    lda #$4C
     sta PPU_ADDR
     lda #$15              ; Inverted cap row 1 (under lip)
     sta PPU_DATA
@@ -486,9 +487,9 @@ reset:
     lda #$18
     sta PPU_DATA
 
-    lda #$25              ; $2400 + 11*32 + 0 = $2560
+    lda #$25              ; $2400 + 11*32 + 12 = $256C
     sta PPU_ADDR
-    lda #$60
+    lda #$6C
     sta PPU_ADDR
     lda #$11              ; Inverted cap row 2 (lip edge)
     sta PPU_DATA
@@ -500,9 +501,9 @@ reset:
     sta PPU_DATA
 
     ; Bottom pipe cap (rows 20-21)
-    lda #$26              ; $2400 + 20*32 + 0 = $2680
+    lda #$26              ; $2400 + 20*32 + 12 = $268C
     sta PPU_ADDR
-    lda #$80
+    lda #$8C
     sta PPU_ADDR
     lda #$05
     sta PPU_DATA
@@ -513,9 +514,9 @@ reset:
     lda #$08
     sta PPU_DATA
 
-    lda #$26              ; $2400 + 21*32 + 0 = $26A0
+    lda #$26              ; $2400 + 21*32 + 12 = $26AC
     sta PPU_ADDR
-    lda #$A0
+    lda #$AC
     sta PPU_ADDR
     lda #$09
     sta PPU_DATA
@@ -545,7 +546,8 @@ reset:
     asl a
     asl a
     asl a                 ; A = (row & 7) * 32
-    ; Column 0, no addition needed
+    clc
+    adc #12               ; + column 12
     sta PPU_ADDR
     lda #$0D
     sta PPU_DATA
@@ -559,36 +561,36 @@ reset:
     cpx #26               ; End at row 25 (before ground at row 26)
     bne @pipe_body2
 
-    ; Set attributes for pipe in nametable 1 (column 0)
+    ; Set attributes for pipe in nametable 1 (column 3, covers tiles 12-15)
     ; Top pipe attributes (cap ends at row 11, gap at 12-19)
     lda #$27
     sta PPU_ADDR
-    lda #$C0              ; Attribute row 0, column 0
+    lda #$C3              ; Attribute row 0, column 3
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$27
     sta PPU_ADDR
-    lda #$C8              ; Attribute row 1, column 0
+    lda #$CB              ; Attribute row 1, column 3
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$27
     sta PPU_ADDR
-    lda #$D0              ; Attribute row 2, column 0
+    lda #$D3              ; Attribute row 2, column 3
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     ; Bottom pipe attributes
     lda #$27
     sta PPU_ADDR
-    lda #$E8              ; Attribute row 5, column 0
+    lda #$EB              ; Attribute row 5, column 3
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$27
     sta PPU_ADDR
-    lda #$F0              ; Attribute row 6, column 0
+    lda #$F3              ; Attribute row 6, column 3
     sta PPU_ADDR
     lda #$5A              ; %01011010 = top palette 2, bottom palette 1
     sta PPU_DATA
@@ -863,38 +865,38 @@ read_controller:
 ;===============================================================================
 check_pipe_collision:
     ; Calculate pipe X position based on scroll
-    ; Pipe is at column 16 = pixel 128
-    ; Effective X = (128 - scroll_x) wrapped to 0-255
+    ; Pipe 0 is at NT0 column 28 = pixel 224
+    ; Effective X = (224 - scroll_x) wrapped to 0-255
     ; But we also need to handle nametable wrap (256-511)
 
-    ; For nametable 0: pipe_x = 128 - scroll_x
-    ; For nametable 1: pipe_x = 128 + 256 - scroll_x = 384 - scroll_x
+    ; For nametable 0: pipe_x = 224 - scroll_x
+    ; For nametable 1: pipe_x = 224 + 256 - scroll_x = 480 - scroll_x
 
     lda scroll_nt
     bne @nt1_pipe
 
-    ; Nametable 0: pipe_x = 128 - scroll_x
-    lda #128
+    ; Nametable 0: pipe_x = 224 - scroll_x
+    lda #224
     sec
     sbc scroll_x
     jmp @check_x_overlap
 
 @nt1_pipe:
-    ; Nametable 1: pipe at 128, but we're viewing nt1
-    ; pipe_x = 128 + 256 - scroll_x, but this can be > 255
-    ; Simplified: if scroll_x < 128, pipe is off-screen right (> 255)
-    ;             if scroll_x >= 128, pipe_x = 128 - (scroll_x - 256) = 384 - scroll_x
+    ; Nametable 1: pipe at 224, but we're viewing nt1
+    ; pipe_x = 224 + 256 - scroll_x, but this can be > 255
+    ; Simplified: if scroll_x < 224, pipe is off-screen right (> 255)
+    ;             if scroll_x >= 224, pipe_x = 224 - (scroll_x - 256) = 480 - scroll_x
     ; Since we can't easily handle >255, check if pipe is visible
     lda scroll_x
-    cmp #128
+    cmp #224
     bcc @no_collision     ; Pipe is off-screen to the right
-    ; pipe_x = 384 - scroll_x = -(scroll_x - 384) = we need 16-bit math
-    ; Simpler: pipe_x = 128 - (scroll_x - 256) but scroll_x < 256
-    ; Actually: when on nt1, the nt0 pipe is at 128 - scroll_x + 256
-    ; If scroll_x = 200, pipe_x = 128 - 200 + 256 = 184
+    ; pipe_x = 480 - scroll_x = -(scroll_x - 480) = we need 16-bit math
+    ; Simpler: pipe_x = 224 - (scroll_x - 256) but scroll_x < 256
+    ; Actually: when on nt1, the nt0 pipe is at 224 - scroll_x + 256
+    ; If scroll_x = 240, pipe_x = 224 - 240 + 256 = 240
     sec
-    lda #128
-    sbc scroll_x          ; A = 128 - scroll_x (will be negative/wrapped)
+    lda #224
+    sbc scroll_x          ; A = 224 - scroll_x (will be negative/wrapped)
     ; This gives us the right value due to wrap
 
 @check_x_overlap:

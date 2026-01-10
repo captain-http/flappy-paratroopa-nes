@@ -114,23 +114,28 @@ NES background tiles cannot be flipped, so inverted tiles are stored separately 
 
 ## Pipe Spacing
 
-**Decision:** 128px (16 tiles) between consecutive pipes.
+**Decision:** 128px (16 tiles) between consecutive pipes, with delayed first pipe.
 
 **Layout:**
 ```
-Pipe 0: Nametable 0, column 16 (pixel 128)
-Pipe 1: Nametable 1, column 0  (pixel 256)
-Spacing: 256 - 128 = 128 pixels
+Pipe 0: Nametable 0, column 28 (pixel 224) - near right edge
+Pipe 1: Nametable 1, column 12 (pixel 352)
+Spacing: 352 - 224 = 128 pixels
 ```
 
-**Why 128px:**
+**Why column 28 for first pipe:**
+- Initial screen shows no pipe (clean start)
+- Pipe appears after player starts scrolling
+- Gives player time to get comfortable before first obstacle
+
+**Why 128px spacing:**
 - Original Flappy Bird uses ~3.5x bird width spacing (~110-120px)
 - 128px is close to original and aligns with NES tile boundaries (16 tiles)
 - Each nametable is 256px wide, so staggering pipes across nametables provides natural spacing
 
 **Attribute columns:**
-- Pipe 0: attribute column 4 (tiles 16-19)
-- Pipe 1: attribute column 0 (tiles 0-3)
+- Pipe 0: attribute column 7 (tiles 28-31)
+- Pipe 1: attribute column 3 (tiles 12-15)
 
 ## Bird Sprite: 16x16 (4 tiles)
 
