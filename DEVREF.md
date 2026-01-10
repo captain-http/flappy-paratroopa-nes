@@ -184,6 +184,27 @@ FLAP_VEL_HI = $FC    ; -4 in signed 8-bit
 
 Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time creating the characteristic parabolic arc.
 
+## Game State
+
+**Decision:** Simple flag-based game state management.
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| game_over | $0A | 0 = playing, 1 = game over |
+
+**Game over triggers:**
+- Bird touches ground (Y >= GROUND_Y)
+- Bird touches pipe (not yet implemented)
+
+**Game over behavior:**
+- All input ignored
+- Physics frozen (no gravity, no flapping)
+- Scrolling stopped
+- Bird and screen stay in place
+
+**Future:** Press Start to reset game.
+
 ## Scrolling
 
 **Decision:** Horizontal scrolling active only when bird is flying.

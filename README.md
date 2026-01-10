@@ -30,7 +30,7 @@ Output: `build/flappy.nes`
 - [x] Implement gravity — bird falls automatically every frame (8.8 fixed-point)
 - [x] Add flap mechanic — A/B button gives upward velocity (-4 px/frame)
 - [x] Add ground — SMB-style 2x2 tile pattern with external CHR graphics
-- [x] Ground collision — bird stops at ground (Y=192)
+- [x] Ground collision — bird hits ground triggers game over (Y=192)
 
 ### Phase 3: Obstacles
 - [x] Draw one static pipe pair — top and bottom pipes with 64px gap

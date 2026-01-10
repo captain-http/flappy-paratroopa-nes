@@ -611,6 +611,10 @@ game_loop:
     lda #0
     sta nmi_flag
 
+    ; Check if game over - skip all game logic
+    lda game_over
+    bne @game_over_state
+
     ; Read controller
     jsr read_controller
 
@@ -662,16 +666,19 @@ game_loop:
     jmp @clamp_ceiling    ; Wrapped, clamp to ceiling
 
 @check_ground:
-    ; Check ground collision
+    ; Check ground collision - triggers game over
     lda bird_y
     cmp #GROUND_Y
     bcc @no_ground        ; bird_y < GROUND_Y, no collision
+    ; Bird hit ground - game over!
     lda #GROUND_Y         ; Clamp to ground
     sta bird_y
     lda #0                ; Stop falling
     sta bird_vel_lo
     sta bird_vel_hi
     sta bird_y_frac
+    lda #1                ; Set game over flag
+    sta game_over
 @no_ground:
 
     ; Update sprite Y positions
@@ -695,7 +702,11 @@ game_loop:
     eor #$01              ; Toggle bit 0
     sta scroll_nt
 @no_scroll:
+    jmp game_loop
 
+@game_over_state:
+    ; Game is over - just wait, no input or physics
+    ; Bird stays frozen where it landed
     jmp game_loop
 
 nmi:
