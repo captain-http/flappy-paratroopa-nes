@@ -138,6 +138,34 @@ Spacing: 384 - 256 = 128 pixels
 - Pipe 0: attribute column 0 (tiles 0-3)
 - Pipe 1: attribute column 4 (tiles 16-19)
 
+## Pipe Redraw on Scroll Loop
+
+**Decision:** Redraw pipes dynamically when scrolling loops back to the empty nametable.
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| pipe_redraw | $0B | Nametable to redraw (0, 1, or $FF=none) |
+| first_loop | $0C | Set to 1 after first full scroll |
+
+**Mechanism:**
+1. Initial state: NT0 empty, NT1 has both pipes
+2. When scroll_x wraps (255→0), toggle scroll_nt
+3. If switching to NT0 AND first_loop=1, queue NT0 for pipe redraw
+4. If switching to NT1, set first_loop=1 (mark first scroll complete)
+5. NMI handler checks pipe_redraw and calls draw_pipes_in_nt if needed
+
+**Why skip first loop:**
+- NT0 starts empty intentionally (clean start screen)
+- Only redraw after player has scrolled through once
+- first_loop flag prevents redrawing NT0 on initial scroll
+
+**NMI timing:**
+- Pipe redraw uses ~1000 VRAM write cycles
+- VBlank budget: ~2273 cycles
+- After OAM DMA (~513 cycles), ~1760 cycles remain
+- Pipe redraw fits within single VBlank
+
 ## Bird Sprite: 16x16 (4 tiles)
 
 **Decision:** Use 4 tiles arranged 2x2 for the bird.

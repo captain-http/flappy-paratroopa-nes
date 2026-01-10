@@ -118,6 +118,12 @@ reset:
     sta bird_vel_lo
     sta bird_vel_hi
 
+    ; Initialize pipe redraw state
+    lda #$FF
+    sta pipe_redraw       ; $FF = no redraw needed
+    lda #0
+    sta first_loop        ; 0 = haven't completed first loop yet
+
     ; Initialize sprite Y positions from bird_y
     lda bird_y
     sta OAM_BUFFER+0      ; Top-left Y
@@ -722,6 +728,18 @@ game_loop:
     lda scroll_nt
     eor #$01              ; Toggle bit 0
     sta scroll_nt
+    ; Check if we need to queue pipe redraw
+    bne @switched_to_nt1
+    ; Switched to NT0 - redraw pipes if not first loop
+    lda first_loop
+    beq @no_scroll        ; First loop, NT0 starts empty
+    lda #0
+    sta pipe_redraw       ; Queue NT0 for pipe redraw
+    jmp @no_scroll
+@switched_to_nt1:
+    ; Switched to NT1 - mark first loop complete
+    lda #1
+    sta first_loop
 @no_scroll:
     jmp game_loop
 
@@ -799,6 +817,16 @@ nmi:
     sta OAM_ADDR
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
+
+    ; Check if we need to redraw pipes
+    lda pipe_redraw
+    cmp #$FF
+    beq @no_pipe_redraw
+    ; Redraw pipes in the queued nametable
+    jsr draw_pipes_in_nt
+    lda #$FF
+    sta pipe_redraw       ; Clear the flag
+@no_pipe_redraw:
 
     ; Set scroll position
     bit PPU_STATUS        ; Reset PPU latch
@@ -934,6 +962,581 @@ check_pipe_collision:
     ; Bird hit pipe - start dying
     lda #STATE_DYING
     sta game_state
+    rts
+
+;===============================================================================
+; Pipe Drawing (called from NMI during vblank)
+;===============================================================================
+draw_pipes_in_nt:
+    ; Draw pipes in nametable specified by pipe_redraw (0 or 1)
+    ; Currently only handles NT0 redraw (pipe_redraw = 0)
+    ; Draws pipe 0 at column 0 and pipe 1 at column 16
+    ;
+    ; For NT0: base address $20, attribute base $23C0
+    ; For NT1: base address $24, attribute base $27C0
+    ;
+    ; This is optimized for speed - uses direct writes instead of loops
+
+    lda pipe_redraw
+    beq @draw_nt0
+    ; NT1 already has pipes from init, skip for now
+    rts
+
+@draw_nt0:
+    ; ===== Draw pipes in NT0 =====
+    ; Pipe 0 at column 0
+
+    ; Top pipe body rows 0-9 (10 rows, 4 tiles each)
+    ; Row 0: $2000
+    lda #$20
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 1: $2020
+    lda #$20
+    sta PPU_ADDR
+    lda #$20
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 2: $2040
+    lda #$20
+    sta PPU_ADDR
+    lda #$40
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 3: $2060
+    lda #$20
+    sta PPU_ADDR
+    lda #$60
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 4: $2080
+    lda #$20
+    sta PPU_ADDR
+    lda #$80
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 5: $20A0
+    lda #$20
+    sta PPU_ADDR
+    lda #$A0
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 6: $20C0
+    lda #$20
+    sta PPU_ADDR
+    lda #$C0
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 7: $20E0
+    lda #$20
+    sta PPU_ADDR
+    lda #$E0
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 8: $2100
+    lda #$21
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 9: $2120
+    lda #$21
+    sta PPU_ADDR
+    lda #$20
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+
+    ; Top pipe cap rows 10-11
+    ; Row 10: $2140
+    lda #$21
+    sta PPU_ADDR
+    lda #$40
+    sta PPU_ADDR
+    lda #$15
+    sta PPU_DATA
+    lda #$16
+    sta PPU_DATA
+    lda #$17
+    sta PPU_DATA
+    lda #$18
+    sta PPU_DATA
+    ; Row 11: $2160
+    lda #$21
+    sta PPU_ADDR
+    lda #$60
+    sta PPU_ADDR
+    lda #$11
+    sta PPU_DATA
+    lda #$12
+    sta PPU_DATA
+    lda #$13
+    sta PPU_DATA
+    lda #$14
+    sta PPU_DATA
+
+    ; Bottom pipe cap rows 20-21
+    ; Row 20: $2280
+    lda #$22
+    sta PPU_ADDR
+    lda #$80
+    sta PPU_ADDR
+    lda #$05
+    sta PPU_DATA
+    lda #$06
+    sta PPU_DATA
+    lda #$07
+    sta PPU_DATA
+    lda #$08
+    sta PPU_DATA
+    ; Row 21: $22A0
+    lda #$22
+    sta PPU_ADDR
+    lda #$A0
+    sta PPU_ADDR
+    lda #$09
+    sta PPU_DATA
+    lda #$0A
+    sta PPU_DATA
+    lda #$0B
+    sta PPU_DATA
+    lda #$0C
+    sta PPU_DATA
+
+    ; Bottom pipe body rows 22-25
+    ; Row 22: $22C0
+    lda #$22
+    sta PPU_ADDR
+    lda #$C0
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    ; Row 23: $22E0
+    lda #$22
+    sta PPU_ADDR
+    lda #$E0
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    ; Row 24: $2300
+    lda #$23
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    ; Row 25: $2320
+    lda #$23
+    sta PPU_ADDR
+    lda #$20
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+
+    ; Set attributes for pipe 0 in NT0 (column 0)
+    lda #$23
+    sta PPU_ADDR
+    lda #$C0
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$C8
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$D0
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$E8
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR
+    lda #$5A
+    sta PPU_DATA
+
+    ; ===== Pipe 1 at column 16 in NT0 =====
+    ; (Similar pattern but at column 16, addresses offset by 16)
+
+    ; Top pipe body rows 0-9
+    ; Row 0: $2010
+    lda #$20
+    sta PPU_ADDR
+    lda #$10
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 1: $2030
+    lda #$20
+    sta PPU_ADDR
+    lda #$30
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 2: $2050
+    lda #$20
+    sta PPU_ADDR
+    lda #$50
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 3: $2070
+    lda #$20
+    sta PPU_ADDR
+    lda #$70
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 4: $2090
+    lda #$20
+    sta PPU_ADDR
+    lda #$90
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 5: $20B0
+    lda #$20
+    sta PPU_ADDR
+    lda #$B0
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 6: $20D0
+    lda #$20
+    sta PPU_ADDR
+    lda #$D0
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 7: $20F0
+    lda #$20
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 8: $2110
+    lda #$21
+    sta PPU_ADDR
+    lda #$10
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    ; Row 9: $2130
+    lda #$21
+    sta PPU_ADDR
+    lda #$30
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+
+    ; Top pipe cap rows 10-11
+    ; Row 10: $2150
+    lda #$21
+    sta PPU_ADDR
+    lda #$50
+    sta PPU_ADDR
+    lda #$15
+    sta PPU_DATA
+    lda #$16
+    sta PPU_DATA
+    lda #$17
+    sta PPU_DATA
+    lda #$18
+    sta PPU_DATA
+    ; Row 11: $2170
+    lda #$21
+    sta PPU_ADDR
+    lda #$70
+    sta PPU_ADDR
+    lda #$11
+    sta PPU_DATA
+    lda #$12
+    sta PPU_DATA
+    lda #$13
+    sta PPU_DATA
+    lda #$14
+    sta PPU_DATA
+
+    ; Bottom pipe cap rows 20-21
+    ; Row 20: $2290
+    lda #$22
+    sta PPU_ADDR
+    lda #$90
+    sta PPU_ADDR
+    lda #$05
+    sta PPU_DATA
+    lda #$06
+    sta PPU_DATA
+    lda #$07
+    sta PPU_DATA
+    lda #$08
+    sta PPU_DATA
+    ; Row 21: $22B0
+    lda #$22
+    sta PPU_ADDR
+    lda #$B0
+    sta PPU_ADDR
+    lda #$09
+    sta PPU_DATA
+    lda #$0A
+    sta PPU_DATA
+    lda #$0B
+    sta PPU_DATA
+    lda #$0C
+    sta PPU_DATA
+
+    ; Bottom pipe body rows 22-25
+    ; Row 22: $22D0
+    lda #$22
+    sta PPU_ADDR
+    lda #$D0
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    ; Row 23: $22F0
+    lda #$22
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    ; Row 24: $2310
+    lda #$23
+    sta PPU_ADDR
+    lda #$10
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    ; Row 25: $2330
+    lda #$23
+    sta PPU_ADDR
+    lda #$30
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+
+    ; Set attributes for pipe 1 in NT0 (column 4)
+    lda #$23
+    sta PPU_ADDR
+    lda #$C4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$CC
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$D4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$EC
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$F4
+    sta PPU_ADDR
+    lda #$5A
+    sta PPU_DATA
+
     rts
 
 ;===============================================================================
