@@ -26,9 +26,9 @@ STATE_DYING   = 2
 STATE_DEAD    = 3
 
 ; Pipe collision constants (based on scroll position)
-PIPE0_COL    = 28       ; Pipe 0 at NT0 column 28 (pixel X = 224)
-PIPE1_COL    = 12       ; Pipe 1 at NT1 column 12 (pixel X = 352)
-PIPE0_X      = 224      ; Pipe 0 pixel X position (28 * 8)
+; Both pipes in NT1 (initial screen is empty)
+PIPE0_COL    = 0        ; Pipe 0 at NT1 column 0 (world pixel 256)
+PIPE1_COL    = 16       ; Pipe 1 at NT1 column 16 (world pixel 384)
 PIPE_WIDTH   = 32       ; Pipe is 4 tiles wide
 GAP_TOP      = 96       ; Top of gap (row 12 * 8)
 GAP_BOTTOM   = 160      ; Bottom of gap (row 20 * 8)
