@@ -89,14 +89,16 @@ Top pipe (cap facing down, inverted):
 
 **Pipe pair layout (rows):**
 ```
-Rows 0-11:   Top pipe body (inverted)
-Row 12:      Top pipe cap ($15-$18)
-Row 13:      Top pipe cap lip ($11-$14)
-Rows 14-19:  Gap (6 tiles = 48px)
+Rows 0-9:    Top pipe body (inverted)
+Row 10:      Top pipe cap ($15-$18)
+Row 11:      Top pipe cap lip ($11-$14)
+Rows 12-19:  Gap (8 tiles = 64px)
 Rows 20-21:  Bottom pipe cap ($05-$0C)
 Rows 22-25:  Bottom pipe body ($0D-$10)
 Rows 26-29:  Ground
 ```
+
+**Gap size:** 64px matches original Flappy Bird ratio (~4x bird height).
 
 **Palette 2 (pipes):** `$22, $29, $1A, $0F`
 - $22: Universal bg (mirrored)

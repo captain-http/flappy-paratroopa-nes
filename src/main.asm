@@ -263,7 +263,7 @@ reset:
     ; Top pipe: body rows 4-13 (hanging from ceiling)
     ; Bottom pipe: cap rows 20-21, body rows 22-25
 
-    ; Top pipe body (rows 0-11) using inverted body tiles
+    ; Top pipe body (rows 0-9) using inverted body tiles
     ldx #0                ; Row counter (start from ceiling)
 @pipe_top:
     ; Calculate high byte: $20 + (row / 8)
@@ -294,13 +294,13 @@ reset:
     lda #$1C
     sta PPU_DATA
     inx
-    cpx #12               ; End at row 11
+    cpx #10               ; End at row 9
     bne @pipe_top
 
-    ; Top pipe cap (rows 12-13) using inverted cap tiles
-    lda #$21              ; $2000 + 12*32 + 16 = $2180 + $10 = $2190
+    ; Top pipe cap (rows 10-11) using inverted cap tiles
+    lda #$21              ; $2000 + 10*32 + 16 = $2140 + $10 = $2150
     sta PPU_ADDR
-    lda #$90
+    lda #$50
     sta PPU_ADDR
     lda #$15              ; Inverted cap row 1 (under lip)
     sta PPU_DATA
@@ -311,9 +311,9 @@ reset:
     lda #$18
     sta PPU_DATA
 
-    lda #$21              ; $2000 + 13*32 + 16 = $21A0 + $10 = $21B0
+    lda #$21              ; $2000 + 11*32 + 16 = $2160 + $10 = $2170
     sta PPU_ADDR
-    lda #$B0
+    lda #$70
     sta PPU_ADDR
     lda #$11              ; Inverted cap row 2 (lip edge)
     sta PPU_DATA
@@ -391,8 +391,8 @@ reset:
     ; Top pipe attributes:
     ; Attr row 0 (tile rows 0-3): all pipe = $AA
     ; Attr row 1 (tile rows 4-7): all pipe = $AA
-    ; Attr row 2 (tile rows 8-11): all pipe = $AA
-    ; Attr row 3 (tile rows 12-15): top=pipe, bottom=sky = $0A
+    ; Attr row 2 (tile rows 8-11): all pipe = $AA (cap ends at row 11)
+    ; Attr row 3 (tile rows 12-15): all gap = $00
     lda #$23
     sta PPU_ADDR
     lda #$C4              ; Attribute row 0, column 4
@@ -410,12 +410,6 @@ reset:
     lda #$D4              ; Attribute row 2, column 4
     sta PPU_ADDR
     lda #$AA
-    sta PPU_DATA
-    lda #$23
-    sta PPU_ADDR
-    lda #$DC              ; Attribute row 3, column 4
-    sta PPU_ADDR
-    lda #$0A              ; %00001010 = top palette 2, bottom palette 0
     sta PPU_DATA
     ;
     ; Bottom pipe attributes:
@@ -436,7 +430,7 @@ reset:
 
     ; Draw second pipe pair in nametable 1 at column 16
 
-    ; Top pipe body (rows 0-11) using inverted body tiles
+    ; Top pipe body (rows 0-9) using inverted body tiles
     ldx #0                ; Row counter (start from ceiling)
 @pipe_top2:
     ; Calculate high byte: $24 + (row / 8)
@@ -467,13 +461,13 @@ reset:
     lda #$1C
     sta PPU_DATA
     inx
-    cpx #12               ; End at row 11
+    cpx #10               ; End at row 9
     bne @pipe_top2
 
-    ; Top pipe cap (rows 12-13) using inverted cap tiles
-    lda #$25              ; $2400 + 12*32 + 16 = $2590
+    ; Top pipe cap (rows 10-11) using inverted cap tiles
+    lda #$25              ; $2400 + 10*32 + 16 = $2550
     sta PPU_ADDR
-    lda #$90
+    lda #$50
     sta PPU_ADDR
     lda #$15              ; Inverted cap row 1 (under lip)
     sta PPU_DATA
@@ -484,9 +478,9 @@ reset:
     lda #$18
     sta PPU_DATA
 
-    lda #$25              ; $2400 + 13*32 + 16 = $25B0
+    lda #$25              ; $2400 + 11*32 + 16 = $2570
     sta PPU_ADDR
-    lda #$B0
+    lda #$70
     sta PPU_ADDR
     lda #$11              ; Inverted cap row 2 (lip edge)
     sta PPU_DATA
@@ -559,7 +553,7 @@ reset:
     bne @pipe_body2
 
     ; Set attributes for pipe in nametable 1
-    ; Top pipe attributes
+    ; Top pipe attributes (cap ends at row 11, gap at 12-19)
     lda #$27
     sta PPU_ADDR
     lda #$C4              ; Attribute row 0, column 4
@@ -577,12 +571,6 @@ reset:
     lda #$D4              ; Attribute row 2, column 4
     sta PPU_ADDR
     lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$DC              ; Attribute row 3, column 4
-    sta PPU_ADDR
-    lda #$0A              ; %00001010 = top palette 2, bottom palette 0
     sta PPU_DATA
     ; Bottom pipe attributes
     lda #$27
