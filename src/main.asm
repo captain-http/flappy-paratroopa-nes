@@ -265,43 +265,335 @@ reset:
     dex
     bne @attr1_ground
 
-    ; Initialize pipe tracking variables
-    lda #PIPE0_INIT_COL
-    sta pipe0_col
-    lda #PIPE0_INIT_GAP
-    sta pipe0_gap
-    lda #0                ; Pipe 0 starts in nametable 0
-    sta pipe0_nt
+    ; Draw static test pipe pair at column 16
+    ; Pipe tiles: $05-$08 cap row1, $09-$0C cap row2, $0D-$10 body
+    ; Gap between pipes: rows 14-19 (6 tiles = 48 pixels)
+    ;
+    ; Top pipe: body rows 4-13 (hanging from ceiling)
+    ; Bottom pipe: cap rows 20-21, body rows 22-25
 
-    lda #PIPE1_INIT_COL
-    sta pipe1_col
-    lda #PIPE1_INIT_GAP
-    sta pipe1_gap
-    lda #1                ; Pipe 1 starts in nametable 1
-    sta pipe1_nt
+    ; Top pipe body (rows 0-9) using inverted body tiles
+    ldx #0                ; Row counter (start from ceiling)
+@pipe_top:
+    ; Calculate high byte: $20 + (row / 8)
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc #$20              ; A = $20 + (row / 8)
+    sta PPU_ADDR
+    ; Calculate low byte: ((row & 7) * 32) + column
+    txa
+    and #$07              ; A = row & 7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc #16               ; + column 16
+    sta PPU_ADDR
+    lda #$19              ; Inverted body tiles
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    inx
+    cpx #10               ; End at row 9
+    bne @pipe_top
 
-    lda #0
-    sta pipe_redraw
-    lda #$47              ; Seed RNG
-    sta rng_state
+    ; Top pipe cap (rows 10-11) using inverted cap tiles
+    lda #$21              ; $2000 + 10*32 + 16 = $2140 + $10 = $2150
+    sta PPU_ADDR
+    lda #$50
+    sta PPU_ADDR
+    lda #$15              ; Inverted cap row 1 (under lip)
+    sta PPU_DATA
+    lda #$16
+    sta PPU_DATA
+    lda #$17
+    sta PPU_DATA
+    lda #$18
+    sta PPU_DATA
 
-    ; Draw pipe 0 in nametable 0
-    lda pipe0_nt
-    sta temp_nt
-    lda pipe0_col
-    sta temp_col
-    lda pipe0_gap
-    sta temp_gap
-    jsr draw_pipe
+    lda #$21              ; $2000 + 11*32 + 16 = $2160 + $10 = $2170
+    sta PPU_ADDR
+    lda #$70
+    sta PPU_ADDR
+    lda #$11              ; Inverted cap row 2 (lip edge)
+    sta PPU_DATA
+    lda #$12
+    sta PPU_DATA
+    lda #$13
+    sta PPU_DATA
+    lda #$14
+    sta PPU_DATA
 
-    ; Draw pipe 1 in nametable 1
-    lda pipe1_nt
-    sta temp_nt
-    lda pipe1_col
-    sta temp_col
-    lda pipe1_gap
-    sta temp_gap
-    jsr draw_pipe
+    ; Bottom pipe cap (rows 20-21)
+    lda #$22              ; $2000 + 20*32 + 16 = $2290
+    sta PPU_ADDR
+    lda #$90
+    sta PPU_ADDR
+    lda #$05
+    sta PPU_DATA
+    lda #$06
+    sta PPU_DATA
+    lda #$07
+    sta PPU_DATA
+    lda #$08
+    sta PPU_DATA
+
+    lda #$22              ; $2000 + 21*32 + 16 = $22B0
+    sta PPU_ADDR
+    lda #$B0
+    sta PPU_ADDR
+    lda #$09
+    sta PPU_DATA
+    lda #$0A
+    sta PPU_DATA
+    lda #$0B
+    sta PPU_DATA
+    lda #$0C
+    sta PPU_DATA
+
+    ; Pipe body (rows 22-25)
+    ldx #22               ; Row counter
+@pipe_body:
+    ; Calculate high byte: $20 + (row / 8)
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc #$20              ; A = $20 + (row / 8)
+    sta PPU_ADDR
+    ; Calculate low byte: ((row & 7) * 32) + column
+    txa
+    and #$07              ; A = row & 7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc #16               ; + column 16
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    inx
+    cpx #26               ; End at row 25 (before ground at row 26)
+    bne @pipe_body
+
+    ; Set attributes for pipe area (palette 2)
+    ; Pipe at columns 16-19 is in attribute column 4
+    ;
+    ; Top pipe attributes:
+    ; Attr row 0 (tile rows 0-3): all pipe = $AA
+    ; Attr row 1 (tile rows 4-7): all pipe = $AA
+    ; Attr row 2 (tile rows 8-11): all pipe = $AA (cap ends at row 11)
+    ; Attr row 3 (tile rows 12-15): all gap = $00
+    lda #$23
+    sta PPU_ADDR
+    lda #$C4              ; Attribute row 0, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$CC              ; Attribute row 1, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$D4              ; Attribute row 2, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ;
+    ; Bottom pipe attributes:
+    ; Attr row 5 (tile rows 20-23): all pipe = $AA
+    ; Attr row 6 (tile rows 24-27): top=pipe, bottom=ground = $5A
+    lda #$23
+    sta PPU_ADDR
+    lda #$EC              ; Attribute row 5, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$23
+    sta PPU_ADDR
+    lda #$F4              ; Attribute row 6, column 4
+    sta PPU_ADDR
+    lda #$5A              ; %01011010 = top palette 2, bottom palette 1
+    sta PPU_DATA
+
+    ; Draw second pipe pair in nametable 1 at column 16
+
+    ; Top pipe body (rows 0-9) using inverted body tiles
+    ldx #0                ; Row counter (start from ceiling)
+@pipe_top2:
+    ; Calculate high byte: $24 + (row / 8)
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc #$24              ; A = $24 + (row / 8)
+    sta PPU_ADDR
+    ; Calculate low byte: ((row & 7) * 32) + column
+    txa
+    and #$07              ; A = row & 7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc #16               ; + column 16
+    sta PPU_ADDR
+    lda #$19              ; Inverted body tiles
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    inx
+    cpx #10               ; End at row 9
+    bne @pipe_top2
+
+    ; Top pipe cap (rows 10-11) using inverted cap tiles
+    lda #$25              ; $2400 + 10*32 + 16 = $2550
+    sta PPU_ADDR
+    lda #$50
+    sta PPU_ADDR
+    lda #$15              ; Inverted cap row 1 (under lip)
+    sta PPU_DATA
+    lda #$16
+    sta PPU_DATA
+    lda #$17
+    sta PPU_DATA
+    lda #$18
+    sta PPU_DATA
+
+    lda #$25              ; $2400 + 11*32 + 16 = $2570
+    sta PPU_ADDR
+    lda #$70
+    sta PPU_ADDR
+    lda #$11              ; Inverted cap row 2 (lip edge)
+    sta PPU_DATA
+    lda #$12
+    sta PPU_DATA
+    lda #$13
+    sta PPU_DATA
+    lda #$14
+    sta PPU_DATA
+
+    ; Bottom pipe cap (rows 20-21)
+    lda #$26              ; $2400 + 20*32 + 16 = $2690
+    sta PPU_ADDR
+    lda #$90
+    sta PPU_ADDR
+    lda #$05
+    sta PPU_DATA
+    lda #$06
+    sta PPU_DATA
+    lda #$07
+    sta PPU_DATA
+    lda #$08
+    sta PPU_DATA
+
+    lda #$26              ; $2400 + 21*32 + 16 = $26B0
+    sta PPU_ADDR
+    lda #$B0
+    sta PPU_ADDR
+    lda #$09
+    sta PPU_DATA
+    lda #$0A
+    sta PPU_DATA
+    lda #$0B
+    sta PPU_DATA
+    lda #$0C
+    sta PPU_DATA
+
+    ; Pipe body (rows 22-25)
+    ldx #22               ; Row counter
+@pipe_body2:
+    ; Calculate high byte: $24 + (row / 8)
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc #$24              ; A = $24 + (row / 8)
+    sta PPU_ADDR
+    ; Calculate low byte: ((row & 7) * 32) + column
+    txa
+    and #$07              ; A = row & 7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc #16               ; + column 16
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    inx
+    cpx #26               ; End at row 25 (before ground at row 26)
+    bne @pipe_body2
+
+    ; Set attributes for pipe in nametable 1
+    ; Top pipe attributes (cap ends at row 11, gap at 12-19)
+    lda #$27
+    sta PPU_ADDR
+    lda #$C4              ; Attribute row 0, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$27
+    sta PPU_ADDR
+    lda #$CC              ; Attribute row 1, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$27
+    sta PPU_ADDR
+    lda #$D4              ; Attribute row 2, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Bottom pipe attributes
+    lda #$27
+    sta PPU_ADDR
+    lda #$EC              ; Attribute row 5, column 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    lda #$27
+    sta PPU_ADDR
+    lda #$F4              ; Attribute row 6, column 4
+    sta PPU_ADDR
+    lda #$5A              ; %01011010 = top palette 2, bottom palette 1
+    sta PPU_DATA
 
     ; Reset scroll position
     bit PPU_STATUS
@@ -433,10 +725,6 @@ game_loop:
     eor #$01              ; Toggle bit 0
     sta scroll_nt
 @no_scroll:
-
-    ; Check if any pipe has scrolled off-screen and needs repositioning
-    jsr check_pipes_offscreen
-
     jmp game_loop
 
 @dying_state:
@@ -514,41 +802,7 @@ nmi:
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
 
-    ; Check if pipe needs redrawing (must happen before scroll setup)
-    lda pipe_redraw
-    beq @no_pipe_update
-
-    ; Pipe redraw needed
-    cmp #1
-    bne @redraw_pipe1
-
-    ; Redraw pipe 0 at its new position
-    lda pipe0_nt
-    sta temp_nt
-    lda pipe0_col
-    sta temp_col
-    lda pipe0_gap
-    sta temp_gap
-    jsr draw_pipe
-    jmp @pipe_update_done
-
-@redraw_pipe1:
-    ; Redraw pipe 1 at its new position
-    lda pipe1_nt
-    sta temp_nt
-    lda pipe1_col
-    sta temp_col
-    lda pipe1_gap
-    sta temp_gap
-    jsr draw_pipe
-
-@pipe_update_done:
-    ; Clear the redraw flag
-    lda #0
-    sta pipe_redraw
-
-@no_pipe_update:
-    ; Set scroll position (must be last before RTI)
+    ; Set scroll position
     bit PPU_STATUS        ; Reset PPU latch
     lda scroll_x
     sta PPU_SCROLL        ; X scroll
@@ -609,600 +863,79 @@ read_controller:
 ;===============================================================================
 ; Pipe Collision Detection
 ;===============================================================================
-; Check both pipes for collision with bird
 check_pipe_collision:
-    ; Check pipe 0
-    lda pipe0_col
-    sta temp_col
-    lda pipe0_gap
-    sta temp_gap
-    lda pipe0_nt
-    sta temp_nt
-    jsr check_single_pipe
-    bcs @collision
+    ; Calculate pipe X position based on scroll
+    ; Pipe is at column 16 = pixel 128
+    ; Effective X = (128 - scroll_x) wrapped to 0-255
+    ; But we also need to handle nametable wrap (256-511)
 
-    ; Check pipe 1
-    lda pipe1_col
-    sta temp_col
-    lda pipe1_gap
-    sta temp_gap
-    lda pipe1_nt
-    sta temp_nt
-    jsr check_single_pipe
-    bcs @collision
+    ; For nametable 0: pipe_x = 128 - scroll_x
+    ; For nametable 1: pipe_x = 128 + 256 - scroll_x = 384 - scroll_x
 
-    rts                   ; No collision
+    lda scroll_nt
+    bne @nt1_pipe
 
-@collision:
-    lda #STATE_DYING
-    sta game_state
-    rts
-
-; Check collision with a single pipe
-; Input: temp_col, temp_gap, temp_nt
-; Output: Carry set if collision
-check_single_pipe:
-    ; Calculate pipe screen X position
-    ; pipe_pixel_x = temp_col * 8
-    lda temp_col
-    asl a
-    asl a
-    asl a                 ; A = column * 8 = pixel X in nametable
-
-    ; Adjust for scroll: screen_x = pipe_pixel_x - scroll_x
-    ; But need to account for which nametable we're viewing vs pipe is in
-    sec
-    sbc scroll_x          ; A = pipe_x - scroll_x (may wrap)
-
-    ; If pipe is in different nametable than we're viewing, adjust by 256
-    ; If viewing NT0 (scroll_nt=0) and pipe in NT1 (temp_nt=1): add 256
-    ; If viewing NT1 (scroll_nt=1) and pipe in NT0 (temp_nt=0): result is correct with wrap
-    ldx scroll_nt
-    cpx temp_nt
-    beq @same_nt
-
-    ; Different nametables
-    ldx temp_nt
-    beq @pipe_in_nt0
-    ; Pipe in NT1, viewing NT0: pipe is 256 pixels to the right
-    ; If result is < 128, it's off-screen right (add 256 would make it > 255)
-    cmp #128
-    bcs @check_x          ; Visible range
-    clc                   ; No collision (off-screen right)
-    rts
-
-@pipe_in_nt0:
-    ; Pipe in NT0, viewing NT1: pipe may be on screen or off left
-    ; The subtraction already wraps correctly
-    jmp @check_x
-
-@same_nt:
-    ; Same nametable - straightforward
-
-@check_x:
-    ; A = pipe screen X (left edge)
-    ; Check X overlap with bird (56-72)
-    cmp #BIRD_RIGHT
-    bcs @no_hit           ; pipe_x >= 72, pipe is to the right
-
-    ; Check if pipe right edge (pipe_x + 32) > bird left (56)
-    ; i.e., pipe_x > 56 - 32 = 24
-    cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
-    bcc @no_hit           ; pipe_x < 25, pipe is to the left
-
-    ; X overlaps - check Y against this pipe's gap
-    ; gap_top_y = temp_gap * 8
-    lda temp_gap
-    asl a
-    asl a
-    asl a                 ; A = gap_top in pixels
-    sta temp_row          ; Save gap_top
-
-    ; Collision if bird_y < gap_top
-    lda bird_y
-    cmp temp_row
-    bcc @hit              ; bird_y < gap_top, hit top pipe
-
-    ; Collision if bird_y + 16 > gap_top + 64 (gap_bottom)
-    ; i.e., bird_y > gap_top + 64 - 16 = gap_top + 48
-    lda temp_row
-    clc
-    adc #(GAP_HEIGHT - 16) ; gap_top + 48
-    sta temp_row
-    lda bird_y
-    cmp temp_row
-    bcs @hit              ; bird_y >= gap_top + 48, hit bottom pipe
-
-@no_hit:
-    clc                   ; Clear carry = no collision
-    rts
-
-@hit:
-    sec                   ; Set carry = collision
-    rts
-
-;===============================================================================
-; Pipe Off-Screen Detection
-;===============================================================================
-; Check if pipes have scrolled off-screen left and need repositioning
-check_pipes_offscreen:
-    ; Only check if no redraw is pending
-    lda pipe_redraw
-    bne @done             ; Already have a pending redraw
-
-    ; Check pipe 0
-    lda pipe0_col
-    asl a
-    asl a
-    asl a                 ; A = pipe0 pixel X in its nametable
-    sec
-    sbc scroll_x          ; A = relative screen X
-
-    ; Adjust for which nametable pipe is in vs which we're viewing
-    ldx pipe0_nt
-    cpx scroll_nt
-    beq @check_pipe0_offscreen
-    ; Different nametables - pipe is far away, skip
-    jmp @check_pipe1
-
-@check_pipe0_offscreen:
-    ; Same nametable - check if pipe has scrolled off left
-    clc
-    adc #PIPE_WIDTH       ; A = right edge
-    cmp #PIPE_WIDTH       ; If right edge < 32, pipe is off left
-    bcs @check_pipe1
-
-    ; Pipe 0 is off-screen - reposition to OTHER nametable
-    lda #1
-    sta pipe_redraw       ; Mark pipe 0 for redraw
-
-    ; Toggle nametable for pipe 0
-    lda pipe0_nt
-    eor #1
-    sta pipe0_nt
-
-    ; New column: 28 (near right edge of the new nametable)
-    lda #28
-    sta pipe0_col
-
-    ; Generate random gap
-    jsr get_random_gap
-    sta pipe0_gap
-
-    rts
-
-@check_pipe1:
-    ; Check pipe 1
-    lda pipe1_col
-    asl a
-    asl a
-    asl a                 ; A = pipe1 pixel X
+    ; Nametable 0: pipe_x = 128 - scroll_x
+    lda #128
     sec
     sbc scroll_x
+    jmp @check_x_overlap
 
-    ; Check if in same nametable as we're viewing
-    ldx pipe1_nt
-    cpx scroll_nt
-    beq @check_pipe1_offscreen
-    ; Different nametables - skip
-    jmp @done
-
-@check_pipe1_offscreen:
-    clc
-    adc #PIPE_WIDTH
-    cmp #PIPE_WIDTH
-    bcs @done
-
-    ; Pipe 1 is off-screen - reposition to OTHER nametable
-    lda #2
-    sta pipe_redraw
-
-    ; Toggle nametable for pipe 1
-    lda pipe1_nt
-    eor #1
-    sta pipe1_nt
-
-    ; New column
-    lda #28
-    sta pipe1_col
-
-    ; Generate random gap
-    jsr get_random_gap
-    sta pipe1_gap
-
-@done:
-    rts
-
-;===============================================================================
-; Pipe Drawing Subroutine
-;===============================================================================
-; Inputs: temp_nt (0 or 1), temp_col (0-31), temp_gap (gap top row, 8-16)
-; Draws a full pipe pair at the specified column with gap at specified row
-draw_pipe:
-    ; Calculate nametable base address high byte
-    lda temp_nt
-    beq @nt0_base
-    lda #$24              ; Nametable 1 base
-    jmp @store_base
-@nt0_base:
-    lda #$20              ; Nametable 0 base
-@store_base:
-    sta temp_row          ; Reuse temp_row to store NT base high byte
-
-    ; === TOP PIPE BODY (rows 0 to gap-2) ===
-    ldx #0                ; Row counter
-@top_body:
-    txa
-    clc
-    adc #2                ; A = row + 2
-    cmp temp_gap          ; Compare row+2 with gap
-    bcs @top_cap          ; If row+2 >= gap, done with body
-
-    ; Calculate PPU address: base + (row/8)*$100 + (row&7)*32 + col
-    jsr calc_pipe_row_addr
-    lda #$19              ; Inverted body tiles
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    inx
-    jmp @top_body
-
-@top_cap:
-    ; === TOP PIPE CAP (2 rows before gap) ===
-    ; Cap row 1 (gap-2): tiles $15-$18
-    lda temp_gap
+@nt1_pipe:
+    ; Nametable 1: pipe at 128, but we're viewing nt1
+    ; pipe_x = 128 + 256 - scroll_x, but this can be > 255
+    ; Simplified: if scroll_x < 128, pipe is off-screen right (> 255)
+    ;             if scroll_x >= 128, pipe_x = 128 - (scroll_x - 256) = 384 - scroll_x
+    ; Since we can't easily handle >255, check if pipe is visible
+    lda scroll_x
+    cmp #128
+    bcc @no_collision     ; Pipe is off-screen to the right
+    ; pipe_x = 384 - scroll_x = -(scroll_x - 384) = we need 16-bit math
+    ; Simpler: pipe_x = 128 - (scroll_x - 256) but scroll_x < 256
+    ; Actually: when on nt1, the nt0 pipe is at 128 - scroll_x + 256
+    ; If scroll_x = 200, pipe_x = 128 - 200 + 256 = 184
     sec
-    sbc #2
-    tax                   ; X = gap - 2
-    jsr calc_pipe_row_addr
-    lda #$15
-    sta PPU_DATA
-    lda #$16
-    sta PPU_DATA
-    lda #$17
-    sta PPU_DATA
-    lda #$18
-    sta PPU_DATA
+    lda #128
+    sbc scroll_x          ; A = 128 - scroll_x (will be negative/wrapped)
+    ; This gives us the right value due to wrap
 
-    ; Cap row 2 (gap-1): tiles $11-$14 (lip)
-    lda temp_gap
-    sec
-    sbc #1
-    tax                   ; X = gap - 1
-    jsr calc_pipe_row_addr
-    lda #$11
-    sta PPU_DATA
-    lda #$12
-    sta PPU_DATA
-    lda #$13
-    sta PPU_DATA
-    lda #$14
-    sta PPU_DATA
+@check_x_overlap:
+    ; A = pipe_x (left edge of pipe)
+    ; Check if bird (X=56-72) overlaps pipe (X=pipe_x to pipe_x+32)
+    ; Bird overlaps if: pipe_x < bird_right (72) AND pipe_x + 32 > bird_left (56)
 
-    ; === GAP (8 rows) - clear with sky tiles ===
-    lda temp_gap
-    tax                   ; X = gap start row
-    ldy #8                ; 8 rows to clear
-@clear_gap:
-    jsr calc_pipe_row_addr
-    lda #$00              ; Sky tile
-    sta PPU_DATA
-    sta PPU_DATA
-    sta PPU_DATA
-    sta PPU_DATA
-    inx
-    dey
-    bne @clear_gap
+    ; Check: pipe_x >= 72 means no overlap (pipe is to the right)
+    cmp #BIRD_RIGHT
+    bcs @no_collision     ; pipe_x >= 72, no overlap
 
-    ; === BOTTOM PIPE CAP (gap+8 and gap+9) ===
-    ; Cap row 1 (gap+8): tiles $05-$08
-    lda temp_gap
-    clc
-    adc #8
-    tax                   ; X = gap + 8
-    jsr calc_pipe_row_addr
-    lda #$05
-    sta PPU_DATA
-    lda #$06
-    sta PPU_DATA
-    lda #$07
-    sta PPU_DATA
-    lda #$08
-    sta PPU_DATA
+    ; Check: pipe_x + 32 <= 56 means no overlap (pipe is to the left)
+    ; pipe_x + 32 <= 56 means pipe_x <= 24
+    cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
+    bcc @no_collision     ; pipe_x < 25, pipe is to the left
 
-    ; Cap row 2 (gap+9): tiles $09-$0C
-    lda temp_gap
-    clc
-    adc #9
-    tax                   ; X = gap + 9
-    jsr calc_pipe_row_addr
-    lda #$09
-    sta PPU_DATA
-    lda #$0A
-    sta PPU_DATA
-    lda #$0B
-    sta PPU_DATA
-    lda #$0C
-    sta PPU_DATA
+    ; X overlaps! Now check Y
+    ; Bird must be OUTSIDE the gap to collide
+    ; Gap is Y = 96 to 160 (rows 12-19)
+    ; Bird is 16px tall, so check bird_y and bird_y+16
 
-    ; === BOTTOM PIPE BODY (gap+10 to row 25) ===
-    lda temp_gap
-    clc
-    adc #10
-    tax                   ; X = gap + 10
-@bottom_body:
-    cpx #26               ; Stop at row 26 (ground)
-    bcs @set_attributes
+    ; Collision if: bird_y < GAP_TOP (96) OR bird_y + 16 > GAP_BOTTOM (160)
+    ; Which means: bird_y < 96 OR bird_y > 144
 
-    jsr calc_pipe_row_addr
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    inx
-    jmp @bottom_body
+    lda bird_y
+    cmp #GAP_TOP
+    bcc @collision        ; bird_y < 96, hit top pipe
 
-@set_attributes:
-    ; === SET ATTRIBUTES FOR PIPE COLUMN ===
-    ; Attribute column = temp_col / 4
-    ; We need to set palette 2 for pipe tiles
+    ; Check bottom: bird_y + 16 > GAP_BOTTOM means bird_y > GAP_BOTTOM - 16
+    cmp #(GAP_BOTTOM - 16)
+    bcs @collision        ; bird_y >= 144, hit bottom pipe
 
-    ; Calculate attribute base: $23C0 (NT0) or $27C0 (NT1)
-    lda temp_nt
-    beq @attr_nt0
-    lda #$27
-    jmp @attr_base
-@attr_nt0:
-    lda #$23
-@attr_base:
-    sta PPU_ADDR
-
-    ; Attribute column = temp_col / 4
-    lda temp_col
-    lsr a
-    lsr a                 ; A = col / 4
-    clc
-    adc #$C0              ; + $C0 = attribute table offset
-    sta PPU_ADDR
-
-    ; Row 0: all pipe
-    lda #$AA
-    sta PPU_DATA
-
-    ; Need to set remaining attribute rows
-    ; Attr row 1 (at +8)
-    lda temp_nt
-    beq @attr1_nt0
-    lda #$27
-    jmp @attr1_set
-@attr1_nt0:
-    lda #$23
-@attr1_set:
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$C8              ; Row 1
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    ; Attr row 2 (at +16)
-    lda temp_nt
-    beq @attr2_nt0
-    lda #$27
-    jmp @attr2_set
-@attr2_nt0:
-    lda #$23
-@attr2_set:
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$D0              ; Row 2
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    ; Attr row 5 (bottom pipe)
-    lda temp_nt
-    beq @attr5_nt0
-    lda #$27
-    jmp @attr5_set
-@attr5_nt0:
-    lda #$23
-@attr5_set:
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$E8              ; Row 5
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    ; Attr row 6 (pipe/ground transition)
-    lda temp_nt
-    beq @attr6_nt0
-    lda #$27
-    jmp @attr6_set
-@attr6_nt0:
-    lda #$23
-@attr6_set:
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$F0              ; Row 6
-    sta PPU_ADDR
-    lda #$5A              ; Top=pipe (palette 2), bottom=ground (palette 1)
-    sta PPU_DATA
-
+@no_collision:
     rts
 
-; Helper: Calculate PPU address for pipe row
-; Input: X = row number, temp_row = NT base high byte, temp_col = column
-; Sets PPU_ADDR
-calc_pipe_row_addr:
-    ; High byte: base + (row / 8)
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc temp_row          ; Add NT base
-    sta PPU_ADDR
-    ; Low byte: (row & 7) * 32 + column
-    txa
-    and #$07
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    clc
-    adc temp_col
-    sta PPU_ADDR
-    rts
-
-;===============================================================================
-; Clear Pipe (write sky tiles)
-;===============================================================================
-; Inputs: temp_nt (0 or 1), temp_col (0-31)
-; Clears the pipe column with sky tiles
-clear_pipe:
-    ; Calculate nametable base
-    lda temp_nt
-    beq @clear_nt0
-    lda #$24
-    jmp @clear_base
-@clear_nt0:
-    lda #$20
-@clear_base:
-    sta temp_row          ; Store NT base
-
-    ; Clear rows 0-25 (ground at 26)
-    ldx #0
-@clear_loop:
-    cpx #26
-    bcs @clear_done
-
-    jsr calc_pipe_row_addr
-    lda #$00              ; Sky tile
-    sta PPU_DATA
-    sta PPU_DATA
-    sta PPU_DATA
-    sta PPU_DATA
-    inx
-    jmp @clear_loop
-
-@clear_done:
-    ; Clear attributes for this column (reset to sky/ground)
-    lda temp_nt
-    beq @clear_attr_nt0
-    lda #$27
-    jmp @clear_attr_rows
-@clear_attr_nt0:
-    lda #$23
-@clear_attr_rows:
-    ; Rows 0-2: set to $00 (sky)
-    pha                   ; Save high byte
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$C0
-    sta PPU_ADDR
-    lda #$00
-    sta PPU_DATA
-
-    pla
-    pha
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$C8
-    sta PPU_ADDR
-    lda #$00
-    sta PPU_DATA
-
-    pla
-    pha
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$D0
-    sta PPU_ADDR
-    lda #$00
-    sta PPU_DATA
-
-    ; Rows 5-6: reset to ground palette
-    pla
-    pha
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$E8
-    sta PPU_ADDR
-    lda #$55              ; Ground palette
-    sta PPU_DATA
-
-    pla
-    sta PPU_ADDR
-    lda temp_col
-    lsr a
-    lsr a
-    clc
-    adc #$F0
-    sta PPU_ADDR
-    lda #$55
-    sta PPU_DATA
-
-    rts
-
-;===============================================================================
-; Random Number Generator (8-bit LFSR)
-;===============================================================================
-; Returns random value in A, updates rng_state
-get_random:
-    lda rng_state
-    beq @seed             ; Avoid stuck at 0
-    asl a
-    bcc @no_xor
-    eor #$1D              ; Tap polynomial
-@no_xor:
-    sta rng_state
-    rts
-@seed:
-    lda #$47              ; Seed value
-    sta rng_state
-    jmp get_random
-
-; Get random gap row (9-16)
-get_random_gap:
-    jsr get_random
-    and #$07              ; 0-7
-    clc
-    adc #9                ; 9-16
+@collision:
+    ; Bird hit pipe - start dying
+    lda #STATE_DYING
+    sta game_state
     rts
 
 ;===============================================================================
