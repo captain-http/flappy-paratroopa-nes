@@ -73,13 +73,13 @@ Row 28: $03 $04 $03 $04...  (bottom-left, bottom-right)
 
 ```
 ┌───┬───┐
-│ 0 │ 1 │  Each tile = 8x8
-├───┼───┤  Total = 16x16 pixels
-│ 2 │ 3 │  4 OAM entries needed
+│ 1 │ 1 │  Currently: all use tile $01 (placeholder)
+├───┼───┤  Future: tiles $01-$04 for proper bird graphic
+│ 1 │ 1 │  4 OAM entries needed
 └───┴───┘
 ```
 
-**Prototype color:** `$27` (yellow)
+**Sprite tile:** `$01` from pattern table 0 (sprite bank)
 
 **X position:** 56-72 (centered at 1/4 screen width)
 - NES screen width: 256 pixels
