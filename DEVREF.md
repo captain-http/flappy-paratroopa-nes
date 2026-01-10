@@ -112,6 +112,26 @@ Rows 26-29:  Ground
 
 NES background tiles cannot be flipped, so inverted tiles are stored separately in CHR-ROM.
 
+## Pipe Spacing
+
+**Decision:** 128px (16 tiles) between consecutive pipes.
+
+**Layout:**
+```
+Pipe 0: Nametable 0, column 16 (pixel 128)
+Pipe 1: Nametable 1, column 0  (pixel 256)
+Spacing: 256 - 128 = 128 pixels
+```
+
+**Why 128px:**
+- Original Flappy Bird uses ~3.5x bird width spacing (~110-120px)
+- 128px is close to original and aligns with NES tile boundaries (16 tiles)
+- Each nametable is 256px wide, so staggering pipes across nametables provides natural spacing
+
+**Attribute columns:**
+- Pipe 0: attribute column 4 (tiles 16-19)
+- Pipe 1: attribute column 0 (tiles 0-3)
+
 ## Bird Sprite: 16x16 (4 tiles)
 
 **Decision:** Use 4 tiles arranged 2x2 for the bird.

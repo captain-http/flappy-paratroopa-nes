@@ -437,7 +437,7 @@ reset:
     lda #$5A              ; %01011010 = top palette 2, bottom palette 1
     sta PPU_DATA
 
-    ; Draw second pipe pair in nametable 1 at column 16
+    ; Draw second pipe pair in nametable 1 at column 0 (128px spacing from pipe 0)
 
     ; Top pipe body (rows 0-9) using inverted body tiles
     ldx #0                ; Row counter (start from ceiling)
@@ -458,8 +458,7 @@ reset:
     asl a
     asl a
     asl a                 ; A = (row & 7) * 32
-    clc
-    adc #16               ; + column 16
+    ; Column 0, no addition needed
     sta PPU_ADDR
     lda #$19              ; Inverted body tiles
     sta PPU_DATA
@@ -474,9 +473,9 @@ reset:
     bne @pipe_top2
 
     ; Top pipe cap (rows 10-11) using inverted cap tiles
-    lda #$25              ; $2400 + 10*32 + 16 = $2550
+    lda #$25              ; $2400 + 10*32 + 0 = $2540
     sta PPU_ADDR
-    lda #$50
+    lda #$40
     sta PPU_ADDR
     lda #$15              ; Inverted cap row 1 (under lip)
     sta PPU_DATA
@@ -487,9 +486,9 @@ reset:
     lda #$18
     sta PPU_DATA
 
-    lda #$25              ; $2400 + 11*32 + 16 = $2570
+    lda #$25              ; $2400 + 11*32 + 0 = $2560
     sta PPU_ADDR
-    lda #$70
+    lda #$60
     sta PPU_ADDR
     lda #$11              ; Inverted cap row 2 (lip edge)
     sta PPU_DATA
@@ -501,9 +500,9 @@ reset:
     sta PPU_DATA
 
     ; Bottom pipe cap (rows 20-21)
-    lda #$26              ; $2400 + 20*32 + 16 = $2690
+    lda #$26              ; $2400 + 20*32 + 0 = $2680
     sta PPU_ADDR
-    lda #$90
+    lda #$80
     sta PPU_ADDR
     lda #$05
     sta PPU_DATA
@@ -514,9 +513,9 @@ reset:
     lda #$08
     sta PPU_DATA
 
-    lda #$26              ; $2400 + 21*32 + 16 = $26B0
+    lda #$26              ; $2400 + 21*32 + 0 = $26A0
     sta PPU_ADDR
-    lda #$B0
+    lda #$A0
     sta PPU_ADDR
     lda #$09
     sta PPU_DATA
@@ -546,8 +545,7 @@ reset:
     asl a
     asl a
     asl a                 ; A = (row & 7) * 32
-    clc
-    adc #16               ; + column 16
+    ; Column 0, no addition needed
     sta PPU_ADDR
     lda #$0D
     sta PPU_DATA
@@ -561,36 +559,36 @@ reset:
     cpx #26               ; End at row 25 (before ground at row 26)
     bne @pipe_body2
 
-    ; Set attributes for pipe in nametable 1
+    ; Set attributes for pipe in nametable 1 (column 0)
     ; Top pipe attributes (cap ends at row 11, gap at 12-19)
     lda #$27
     sta PPU_ADDR
-    lda #$C4              ; Attribute row 0, column 4
+    lda #$C0              ; Attribute row 0, column 0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$27
     sta PPU_ADDR
-    lda #$CC              ; Attribute row 1, column 4
+    lda #$C8              ; Attribute row 1, column 0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$27
     sta PPU_ADDR
-    lda #$D4              ; Attribute row 2, column 4
+    lda #$D0              ; Attribute row 2, column 0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     ; Bottom pipe attributes
     lda #$27
     sta PPU_ADDR
-    lda #$EC              ; Attribute row 5, column 4
+    lda #$E8              ; Attribute row 5, column 0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
     lda #$27
     sta PPU_ADDR
-    lda #$F4              ; Attribute row 6, column 4
+    lda #$F0              ; Attribute row 6, column 0
     sta PPU_ADDR
     lda #$5A              ; %01011010 = top palette 2, bottom palette 1
     sta PPU_DATA
