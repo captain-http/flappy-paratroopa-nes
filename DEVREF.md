@@ -145,15 +145,15 @@ Spacing: 384 - 256 = 128 pixels
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
-| pipe_redraw | $0B | Redraw state (see state machine below) |
+| pipe_redraw | $0B | Redraw state: 0=pipe 0, 1=pipe 1, $FF=none |
 | nt_base | $0C | Nametable base ($20=NT0, $24=NT1) |
 | pipe_col | $0D | Current pipe column (0 or 16) |
 
 **Mechanism:**
-1. Initial state: NT1 has both pipes at default gap, NT0 is empty
+1. Initial state: NT0 empty, NT1 has both pipes
 2. When scroll_x wraps (255→0), toggle scroll_nt
 3. When switching TO NT1: NT0 just scrolled off-screen, set pipe_redraw=0
-4. When switching TO NT0: NT1 just scrolled off-screen, set pipe_redraw=2
+4. When switching TO NT0: Do nothing (NT1 keeps its pipes from init)
 5. NMI handler checks pipe_redraw and calls draw_pipes_in_nt if needed
 
 **Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view.
@@ -163,13 +163,8 @@ Spacing: 384 - 256 = 128 pixels
 Drawing both pipes (~2560 cycles) exceeds the available vblank time (~1760 cycles after OAM DMA). Writing to VRAM outside vblank causes visual glitches. Solution: split across two frames.
 
 ```
-NT0 Redraw:
-Frame N:   pipe_redraw=0 → draw NT0 pipe 0 + attrs → set pipe_redraw=1
-Frame N+1: pipe_redraw=1 → draw NT0 pipe 1 + attrs → set pipe_redraw=$FF
-
-NT1 Redraw:
-Frame N:   pipe_redraw=2 → draw NT1 pipe 0 + attrs → set pipe_redraw=3
-Frame N+1: pipe_redraw=3 → draw NT1 pipe 1 + attrs → set pipe_redraw=$FF
+Frame N:   pipe_redraw=0 → draw pipe 0 + attrs → set pipe_redraw=1
+Frame N+1: pipe_redraw=1 → draw pipe 1 + attrs → set pipe_redraw=$FF
 ```
 
 | Frame | What | Cycles |
@@ -185,10 +180,8 @@ NT0 (empty) visible → scroll → switch to NT1 → pipe_redraw=0
 NT1 visible, NMI draws pipe 0 in NT0 → pipe_redraw=1
 NT1 visible, NMI draws pipe 1 in NT0 → pipe_redraw=$FF
 ... scroll continues ...
-NT0 (now has pipes) visible → scroll → switch to NT0 → pipe_redraw=2
-NT0 visible, NMI draws pipe 0 in NT1 → pipe_redraw=3
-NT0 visible, NMI draws pipe 1 in NT1 → pipe_redraw=$FF
-... continues seamlessly, both nametables now get random pipes
+NT0 (now has pipes) visible → scroll → switch to NT1 → pipe_redraw=0
+... continues seamlessly
 ```
 
 **Cycle Budget:**
@@ -294,72 +287,11 @@ Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time 
 - Ground collision → STATE_DEAD (fully frozen)
 
 **Pipe collision detection:**
-- Calculate pipe X from scroll position
+- Calculate pipe X from scroll: `pipe_x = 128 - scroll_x`
 - Check X overlap: bird (56-72) vs pipe (pipe_x to pipe_x+32)
-- Check Y overlap: bird outside gap using dynamic gap position
+- Check Y overlap: bird outside gap (Y < 96 or Y > 144)
 
 **Future:** Press Start to reset game.
-
-## Random Pipe Heights
-
-**Decision:** Randomize gap position on each pipe redraw for varied gameplay.
-
-**RNG Implementation:**
-8-bit LFSR (Linear Feedback Shift Register) with polynomial $1D:
-```asm
-get_random:
-    lda rng_state
-    asl a
-    bcc @no_xor
-    eor #$1D
-@no_xor:
-    sta rng_state
-    rts
-```
-
-**Gap Range:**
-- Minimum gap row: 8 (gap Y = 64px)
-- Maximum gap row: 14 (gap Y = 112px)
-- Gap size: 8 rows = 64 pixels (constant)
-
-**Variables:**
-| Variable | Address | Description |
-|----------|---------|-------------|
-| nt0_gap0 | $0E | NT0 pipe 0 gap row |
-| nt0_gap1 | $0F | NT0 pipe 1 gap row |
-| nt1_gap0 | $10 | NT1 pipe 0 gap row |
-| nt1_gap1 | $11 | NT1 pipe 1 gap row |
-| pipe_gap | $12 | Current gap (for drawing) |
-| rng_state | $13 | RNG state (non-zero) |
-
-**Why per-nametable tracking:**
-- Each nametable has its own pipes with independent gaps
-- Collision detection must use the correct gap for the visible pipe
-- When viewing NT0, check against nt0_gap values
-- When viewing NT1, check against nt1_gap values
-
-**Pipe Drawing with Variable Gap:**
-The `draw_pipe` routine uses `pipe_gap` to determine:
-- Top body: rows 0 to (pipe_gap - 3)
-- Top cap: rows (pipe_gap - 2) to (pipe_gap - 1)
-- Gap: rows pipe_gap to (pipe_gap + 7) - draws sky tiles
-- Bottom cap: rows (pipe_gap + 8) to (pipe_gap + 9)
-- Bottom body: rows (pipe_gap + 10) to 25
-
-**Redraw State Machine:**
-```
-pipe_redraw values:
-0: Draw NT0 pipe 0, then set to 1
-1: Draw NT0 pipe 1, then set to $FF
-2: Draw NT1 pipe 0, then set to 3
-3: Draw NT1 pipe 1, then set to $FF
-$FF: No redraw needed
-```
-
-**When pipes are randomized:**
-- When NT0 goes off-screen (switch to NT1): queue NT0 redraw (pipe_redraw=0)
-- When NT1 goes off-screen (switch to NT0): queue NT1 redraw (pipe_redraw=2)
-- New random gap generated for each pipe during redraw
 
 ## Scrolling
 
