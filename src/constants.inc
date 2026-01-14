@@ -24,6 +24,19 @@ pipe_redraw = $0B       ; Nametable to redraw pipes in (0, 1, or $FF=none)
 nt_base     = $0C       ; Nametable base high byte ($20=NT0, $24=NT1)
 pipe_col    = $0D       ; Current pipe column (0 or 16)
 
+; Pipe gap variables (for random heights)
+; Track gaps per nametable for correct collision detection
+nt0_gap0    = $0E       ; NT0 pipe 0 gap top row
+nt0_gap1    = $0F       ; NT0 pipe 1 gap top row
+nt1_gap0    = $10       ; NT1 pipe 0 gap top row
+nt1_gap1    = $11       ; NT1 pipe 1 gap top row
+pipe_gap    = $12       ; Current pipe gap row (used during drawing)
+rng_state   = $13       ; Random number generator state
+
+; Temp variables (used locally, don't persist across frames)
+temp        = $14       ; General temp for main loop
+nmi_temp    = $15       ; Temp for NMI handler (draw_pipe)
+
 ; Game state constants
 STATE_WAITING = 0       ; Waiting for player to press A/B
 STATE_PLAYING = 1
@@ -35,10 +48,14 @@ STATE_DEAD    = 3
 PIPE0_COL    = 0        ; Pipe 0 at NT1 column 0 (world pixel 256)
 PIPE1_COL    = 16       ; Pipe 1 at NT1 column 16 (world pixel 384)
 PIPE_WIDTH   = 32       ; Pipe is 4 tiles wide
-GAP_TOP      = 96       ; Top of gap (row 12 * 8)
-GAP_BOTTOM   = 160      ; Bottom of gap (row 20 * 8)
 BIRD_LEFT    = 56       ; Bird left edge X
 BIRD_RIGHT   = 72       ; Bird right edge X (56 + 16)
+
+; Gap constants (dynamic height)
+GAP_SIZE     = 8        ; Gap size in rows (64 pixels)
+GAP_MIN_ROW  = 8        ; Minimum gap top row
+GAP_MAX_ROW  = 14       ; Maximum gap top row
+DEFAULT_GAP  = 12       ; Default gap row (matches original)
 
 ; Physics (8.8 fixed-point)
 GRAVITY     = $40       ; ~0.25 pixels/frame² (floaty feel)

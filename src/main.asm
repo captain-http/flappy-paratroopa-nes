@@ -122,6 +122,19 @@ reset:
     lda #$FF
     sta pipe_redraw       ; $FF = no redraw needed
 
+    ; Initialize RNG state (non-zero seed)
+    lda #$A5              ; Arbitrary seed value
+    sta rng_state
+
+    ; Initialize pipe gaps
+    ; NT1 pipes are drawn at init, NT0 will be drawn on first redraw
+    lda #DEFAULT_GAP
+    sta nt1_gap0
+    sta nt1_gap1
+    ; NT0 gaps will be set when redrawn (but init to default for safety)
+    sta nt0_gap0
+    sta nt0_gap1
+
     ; Initialize sprite Y positions from bird_y
     lda bird_y
     sta OAM_BUFFER+0      ; Top-left Y
@@ -403,12 +416,18 @@ game_loop:
     lda scroll_nt
     eor #$01              ; Toggle bit 0
     sta scroll_nt
-    ; Check if we need to queue pipe redraw
-    ; When switching TO NT1, NT0 just went off-screen - queue it for redraw
-    beq @no_scroll
-    ; Switched to NT1 - NT0 just went off-screen, queue redraw
+    ; Queue pipe redraw for the nametable that just went off-screen
+    ; scroll_nt = 1: switched TO NT1, so NT0 went off-screen, redraw NT0
+    ; scroll_nt = 0: switched TO NT0, so NT1 went off-screen, redraw NT1
+    beq @redraw_nt1
+    ; Switched to NT1 - queue NT0 for redraw (pipe_redraw = 0)
     lda #0
-    sta pipe_redraw       ; Queue NT0 for pipe redraw
+    sta pipe_redraw
+    jmp @no_scroll
+@redraw_nt1:
+    ; Switched to NT0 - queue NT1 for redraw (pipe_redraw = 2)
+    lda #2
+    sta pipe_redraw
 @no_scroll:
     jmp game_loop
 
@@ -548,22 +567,48 @@ read_controller:
     rts
 
 ;===============================================================================
+; Random Number Generator
+; 8-bit LFSR (Linear Feedback Shift Register)
+; Returns random value 0-255 in A
+;===============================================================================
+get_random:
+    lda rng_state
+    asl a               ; Shift left
+    bcc @no_xor
+    eor #$1D            ; XOR with polynomial if carry set
+@no_xor:
+    sta rng_state
+    rts
+
+;===============================================================================
+; Get Random Gap Row
+; Returns random gap row (GAP_MIN_ROW to GAP_MAX_ROW) in A
+;===============================================================================
+get_random_gap:
+    jsr get_random
+    and #$07            ; Mask to 0-7
+    clc
+    adc #GAP_MIN_ROW    ; Add minimum (8), result is 8-15
+    cmp #(GAP_MAX_ROW + 1)
+    bcc @gap_ok
+    lda #GAP_MAX_ROW    ; Clamp to max (14) if 15
+@gap_ok:
+    rts
+
+;===============================================================================
 ; Pipe Collision Detection
 ;===============================================================================
 check_pipe_collision:
-    ; Both pipes are in NT1:
-    ; Pipe 0: NT1 column 0 = world pixel 256
-    ; Pipe 1: NT1 column 16 = world pixel 384
+    ; Pipes are at column 0 in both nametables
+    ; When scroll_nt = 0: viewing NT0, check NT0 pipe (or NT1 pipe from right)
+    ; When scroll_nt = 1: viewing NT1, check NT1 pipe
     ;
-    ; When scroll_nt = 0: viewing NT0, pipes in NT1 are to the right
-    ;   pipe0_screen_x = 256 - scroll_x (visible when scroll_x > 0)
-    ; When scroll_nt = 1: viewing NT1, pipes are here
-    ;   pipe0_screen_x = 0 - scroll_x (visible when scroll_x < 32)
+    ; Scroll position determines which pipe is near the bird
 
     lda scroll_nt
     bne @nt1_view
 
-    ; Viewing NT0: pipe 0 is at screen_x = 256 - scroll_x
+    ; Viewing NT0: NT1 pipe is at screen_x = 256 - scroll_x
     ; If scroll_x = 0, pipe is at 256 (off screen right)
     ; If scroll_x = 200, pipe is at 56 (visible)
     lda scroll_x
@@ -572,22 +617,36 @@ check_pipe_collision:
     lda #0
     sec
     sbc scroll_x          ; A = 256 - scroll_x (due to borrow from bit 8)
+    ; When viewing NT0, the pipe coming from right is NT1's pipe
+    ldx nt1_gap0
     jmp @check_x_overlap
 
 @nt1_view:
-    ; Viewing NT1: pipe 0 is at screen_x = 0 - scroll_x
+    ; Viewing NT1: NT1 pipe is at screen_x = 0 - scroll_x
     ; If scroll_x = 0, pipe is at 0 (visible)
-    ; If scroll_x > 32, pipe is off screen left
+    ; If scroll_x > 32, pipe is off screen left, check NT0 pipe coming from right
     lda scroll_x
     cmp #32
-    bcs @no_collision     ; scroll_x >= 32, pipe off screen left
-    ; pipe_x = 0 - scroll_x (negative, but we handle it)
+    bcc @check_nt1_pipe   ; scroll_x < 32, NT1 pipe still visible
+
+    ; NT1 pipe off screen, check NT0 pipe (at 256 - scroll_x from right)
     lda #0
     sec
-    sbc scroll_x          ; A = -scroll_x (wrapped to 256-scroll_x, but for small scroll_x this works)
+    sbc scroll_x          ; A = 256 - scroll_x
+    ldx nt0_gap0
+    jmp @check_x_overlap
+
+@check_nt1_pipe:
+    ; pipe_x = 0 - scroll_x (negative wraps to 256-scroll_x for small values)
+    lda #0
+    sec
+    sbc scroll_x
+    ; When viewing NT1 near its start, use NT1's gap
+    ldx nt1_gap0
 
 @check_x_overlap:
     ; A = pipe_x (left edge of pipe)
+    ; X = gap top row for this pipe
     ; Check if bird (X=56-72) overlaps pipe (X=pipe_x to pipe_x+32)
     ; Bird overlaps if: pipe_x < bird_right (72) AND pipe_x + 32 > bird_left (56)
 
@@ -600,21 +659,34 @@ check_pipe_collision:
     cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
     bcc @no_collision     ; pipe_x < 25, pipe is to the left
 
-    ; X overlaps! Now check Y
-    ; Bird must be OUTSIDE the gap to collide
-    ; Gap is Y = 96 to 160 (rows 12-19)
-    ; Bird is 16px tall, so check bird_y and bird_y+16
+    ; X overlaps! Now check Y with dynamic gap
+    ; X = gap row, multiply by 8 to get pixel Y
+    ; gap_top_y = X * 8
+    ; gap_bottom_y = gap_top_y + GAP_SIZE * 8 = gap_top_y + 64
 
-    ; Collision if: bird_y < GAP_TOP (96) OR bird_y + 16 > GAP_BOTTOM (160)
-    ; Which means: bird_y < 96 OR bird_y > 144
+    ; Calculate gap_top_y (X * 8)
+    txa
+    asl a
+    asl a
+    asl a                 ; A = gap_row * 8 = gap_top_y
+    sta temp              ; temp: gap_top_y
+
+    ; Bird must be OUTSIDE the gap to collide
+    ; Collision if: bird_y < gap_top_y OR bird_y + 16 > gap_bottom_y
+    ; Which means: bird_y < gap_top_y OR bird_y >= gap_top_y + 64 - 16 = gap_top_y + 48
 
     lda bird_y
-    cmp #GAP_TOP
-    bcc @collision        ; bird_y < 96, hit top pipe
+    cmp temp              ; Compare to gap_top_y
+    bcc @collision        ; bird_y < gap_top_y, hit top pipe
 
-    ; Check bottom: bird_y + 16 > GAP_BOTTOM means bird_y > GAP_BOTTOM - 16
-    cmp #(GAP_BOTTOM - 16)
-    bcs @collision        ; bird_y >= 144, hit bottom pipe
+    ; Check bottom: bird_y >= gap_top_y + 48
+    lda temp
+    clc
+    adc #(GAP_SIZE * 8 - 16)  ; gap_top_y + 48
+    sta temp              ; temp: gap_bottom_threshold
+    lda bird_y
+    cmp temp
+    bcs @collision        ; bird_y >= threshold, hit bottom pipe
 
 @no_collision:
     rts
@@ -630,29 +702,74 @@ check_pipe_collision:
 ;===============================================================================
 draw_pipes_in_nt:
     ; Two-frame pipe redraw to fit in vblank
-    ; pipe_redraw = 0: draw pipe 0, then set to 1
-    ; pipe_redraw = 1: draw pipe 1, then set to $FF (done)
+    ; pipe_redraw = 0: NT0 pipe 0, then set to 1
+    ; pipe_redraw = 1: NT0 pipe 1, then set to $FF (done)
+    ; pipe_redraw = 2: NT1 pipe 0, then set to 3
+    ; pipe_redraw = 3: NT1 pipe 1, then set to $FF (done)
     ; pipe_redraw = $FF: skip (checked by NMI before calling)
-
-    lda #$20              ; NT0 base (only NT0 redraws for now)
-    sta nt_base
 
     bit PPU_STATUS        ; Reset PPU latch
 
     lda pipe_redraw
-    bne @draw_pipe1
+    cmp #2
+    bcs @draw_nt1         ; pipe_redraw >= 2, draw NT1
 
-    ; Frame 1: Draw pipe 0
+    ; --- NT0 redraw ---
+    lda #$20              ; NT0 base
+    sta nt_base
+    lda pipe_redraw
+    bne @nt0_pipe1
+
+    ; NT0 Frame 1: Draw pipe 0 with new random gap
+    jsr get_random_gap
+    sta nt0_gap0
+    sta pipe_gap
     lda #0
     sta pipe_col
     jsr draw_pipe
     jsr draw_pipe0_attrs_only
     lda #1
-    sta pipe_redraw       ; Next frame: draw pipe 1
+    sta pipe_redraw       ; Next frame: NT0 pipe 1
     rts
 
-@draw_pipe1:
-    ; Frame 2: Draw pipe 1
+@nt0_pipe1:
+    ; NT0 Frame 2: Draw pipe 1 with new random gap
+    jsr get_random_gap
+    sta nt0_gap1
+    sta pipe_gap
+    lda #16
+    sta pipe_col
+    jsr draw_pipe
+    jsr draw_pipe1_attrs_only
+    lda #$FF
+    sta pipe_redraw       ; Done
+    rts
+
+@draw_nt1:
+    ; --- NT1 redraw ---
+    lda #$24              ; NT1 base
+    sta nt_base
+    lda pipe_redraw
+    cmp #3
+    beq @nt1_pipe1
+
+    ; NT1 Frame 1: Draw pipe 0 with new random gap
+    jsr get_random_gap
+    sta nt1_gap0
+    sta pipe_gap
+    lda #0
+    sta pipe_col
+    jsr draw_pipe
+    jsr draw_pipe0_attrs_only
+    lda #3
+    sta pipe_redraw       ; Next frame: NT1 pipe 1
+    rts
+
+@nt1_pipe1:
+    ; NT1 Frame 2: Draw pipe 1 with new random gap
+    jsr get_random_gap
+    sta nt1_gap1
+    sta pipe_gap
     lda #16
     sta pipe_col
     jsr draw_pipe
@@ -674,14 +791,18 @@ draw_both_pipes:
     ; Reset PPU address latch before drawing
     bit PPU_STATUS
 
-    ; Draw pipe 0 at column 0
+    ; Draw pipe 0 at column 0 (uses nt1 gaps since this is called for NT1 init)
     lda #0
     sta pipe_col
+    lda nt1_gap0
+    sta pipe_gap
     jsr draw_pipe
 
     ; Draw pipe 1 at column 16
     lda #16
     sta pipe_col
+    lda nt1_gap1
+    sta pipe_gap
     jsr draw_pipe
 
     ; Draw attributes for both pipes
@@ -690,31 +811,20 @@ draw_both_pipes:
 
 ;---------------------------------------
 ; Draw a single pipe at nt_base + pipe_col
-; Top body rows 0-9, cap rows 10-11
-; Gap rows 12-19 (not drawn, sky shows through)
-; Bottom cap rows 20-21, body rows 22-25
+; Uses pipe_gap variable for gap position
+; Layout: top body, top cap, gap (empty), bottom cap, bottom body
 ;---------------------------------------
 draw_pipe:
-    ; Top pipe body (rows 0-9)
+    ; --- Top pipe body (rows 0 to pipe_gap-3) ---
     ldx #0
+    lda pipe_gap
+    sec
+    sbc #2                ; A = pipe_gap - 2 (end row for body, exclusive)
+    sta nmi_temp          ; temp: top body end row
 @top_body:
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc nt_base           ; A = nt_base + (row / 8)
-    sta PPU_ADDR
-    txa
-    and #$07
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    clc
-    adc pipe_col          ; + column
-    sta PPU_ADDR
+    cpx nmi_temp
+    bcs @top_body_done
+    jsr draw_row_addr     ; Set PPU address for row X
     lda #$19
     sta PPU_DATA
     lda #$1A
@@ -724,18 +834,14 @@ draw_pipe:
     lda #$1C
     sta PPU_DATA
     inx
-    cpx #10
-    bne @top_body
+    jmp @top_body
+@top_body_done:
 
-    ; Top pipe cap row 10 (under lip)
-    lda nt_base
-    clc
-    adc #1                ; row 10 is in page +1
-    sta PPU_ADDR
-    lda #$40              ; row 10: (10 & 7) * 32 = 2 * 32 = 64 = $40
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    ; --- Top cap row 1 (pipe_gap - 2): under lip ---
+    ldx pipe_gap
+    dex
+    dex                   ; X = pipe_gap - 2
+    jsr draw_row_addr
     lda #$15
     sta PPU_DATA
     lda #$16
@@ -745,15 +851,10 @@ draw_pipe:
     lda #$18
     sta PPU_DATA
 
-    ; Top pipe cap row 11 (lip edge)
-    lda nt_base
-    clc
-    adc #1                ; row 11 is in page +1
-    sta PPU_ADDR
-    lda #$60              ; row 11: (11 & 7) * 32 = 3 * 32 = 96 = $60
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    ; --- Top cap row 2 (pipe_gap - 1): lip edge ---
+    ldx pipe_gap
+    dex                   ; X = pipe_gap - 1
+    jsr draw_row_addr
     lda #$11
     sta PPU_DATA
     lda #$12
@@ -763,15 +864,32 @@ draw_pipe:
     lda #$14
     sta PPU_DATA
 
-    ; Bottom pipe cap row 20
-    lda nt_base
+    ; --- Gap (pipe_gap to pipe_gap+7): draw sky tiles ---
+    ldx pipe_gap
+    lda pipe_gap
     clc
-    adc #2                ; row 20 is in page +2
-    sta PPU_ADDR
-    lda #$80              ; row 20: (20 & 7) * 32 = 4 * 32 = 128 = $80
+    adc #GAP_SIZE         ; A = pipe_gap + 8
+    sta nmi_temp          ; temp: gap end row
+@gap_clear:
+    cpx nmi_temp
+    bcs @gap_done
+    jsr draw_row_addr
+    lda #$00              ; Sky tile
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    inx
+    jmp @gap_clear
+@gap_done:
+
+    ; --- Bottom cap row 1 (pipe_gap + 8): cap top ---
+    ldx pipe_gap
+    txa
     clc
-    adc pipe_col
-    sta PPU_ADDR
+    adc #GAP_SIZE         ; X = pipe_gap + 8
+    tax
+    jsr draw_row_addr
     lda #$05
     sta PPU_DATA
     lda #$06
@@ -781,15 +899,13 @@ draw_pipe:
     lda #$08
     sta PPU_DATA
 
-    ; Bottom pipe cap row 21
-    lda nt_base
+    ; --- Bottom cap row 2 (pipe_gap + 9): cap bottom ---
+    ldx pipe_gap
+    txa
     clc
-    adc #2                ; row 21 is in page +2
-    sta PPU_ADDR
-    lda #$A0              ; row 21: (21 & 7) * 32 = 5 * 32 = 160 = $A0
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    adc #(GAP_SIZE + 1)   ; X = pipe_gap + 9
+    tax
+    jsr draw_row_addr
     lda #$09
     sta PPU_DATA
     lda #$0A
@@ -799,9 +915,34 @@ draw_pipe:
     lda #$0C
     sta PPU_DATA
 
-    ; Bottom pipe body (rows 22-25)
-    ldx #22
+    ; --- Bottom body (pipe_gap + 10 to row 25) ---
+    ldx pipe_gap
+    txa
+    clc
+    adc #(GAP_SIZE + 2)   ; X = pipe_gap + 10
+    tax
 @bot_body:
+    cpx #26
+    bcs @bot_body_done
+    jsr draw_row_addr
+    lda #$0D
+    sta PPU_DATA
+    lda #$0E
+    sta PPU_DATA
+    lda #$0F
+    sta PPU_DATA
+    lda #$10
+    sta PPU_DATA
+    inx
+    jmp @bot_body
+@bot_body_done:
+    rts
+
+;---------------------------------------
+; Helper: Set PPU address for row X, column pipe_col
+; Preserves X
+;---------------------------------------
+draw_row_addr:
     txa
     lsr a
     lsr a
@@ -819,18 +960,6 @@ draw_pipe:
     clc
     adc pipe_col          ; + column
     sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    inx
-    cpx #26
-    bne @bot_body
-
     rts
 
 ;---------------------------------------
