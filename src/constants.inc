@@ -21,6 +21,8 @@ game_state  = $0A       ; 0 = waiting, 1 = playing, 2 = dying, 3 = dead
 
 ; Pipe redraw variables
 pipe_redraw = $0B       ; Nametable to redraw pipes in (0, 1, or $FF=none)
+nt_base     = $0C       ; Nametable base high byte ($20=NT0, $24=NT1)
+pipe_col    = $0D       ; Current pipe column (0 or 16)
 
 ; Game state constants
 STATE_WAITING = 0       ; Waiting for player to press A/B

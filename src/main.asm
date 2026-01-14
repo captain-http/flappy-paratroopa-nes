@@ -269,333 +269,10 @@ reset:
     dex
     bne @attr1_ground
 
-    ; Draw pipe 0 at NT1 column 0 (pixel 256, first pipe after empty initial screen)
-    ; Pipe tiles: $05-$08 cap row1, $09-$0C cap row2, $0D-$10 body
-    ; Gap between pipes: rows 12-19 (8 tiles = 64 pixels)
-    ;
-    ; Top pipe: body rows 0-9, cap rows 10-11
-    ; Bottom pipe: cap rows 20-21, body rows 22-25
-
-    ; Top pipe body (rows 0-9) using inverted body tiles
-    ldx #0                ; Row counter (start from ceiling)
-@pipe_top:
-    ; Calculate high byte: $24 + (row / 8) for NT1
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc #$24              ; A = $24 + (row / 8) for NT1
-    sta PPU_ADDR
-    ; Calculate low byte: ((row & 7) * 32) + column
-    txa
-    and #$07              ; A = row & 7
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    ; Column 0, no addition needed
-    sta PPU_ADDR
-    lda #$19              ; Inverted body tiles
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    inx
-    cpx #10               ; End at row 9
-    bne @pipe_top
-
-    ; Top pipe cap (rows 10-11) using inverted cap tiles
-    lda #$25              ; $2400 + 10*32 + 0 = $2540
-    sta PPU_ADDR
-    lda #$40
-    sta PPU_ADDR
-    lda #$15              ; Inverted cap row 1 (under lip)
-    sta PPU_DATA
-    lda #$16
-    sta PPU_DATA
-    lda #$17
-    sta PPU_DATA
-    lda #$18
-    sta PPU_DATA
-
-    lda #$25              ; $2400 + 11*32 + 0 = $2560
-    sta PPU_ADDR
-    lda #$60
-    sta PPU_ADDR
-    lda #$11              ; Inverted cap row 2 (lip edge)
-    sta PPU_DATA
-    lda #$12
-    sta PPU_DATA
-    lda #$13
-    sta PPU_DATA
-    lda #$14
-    sta PPU_DATA
-
-    ; Bottom pipe cap (rows 20-21)
-    lda #$26              ; $2400 + 20*32 + 0 = $2680
-    sta PPU_ADDR
-    lda #$80
-    sta PPU_ADDR
-    lda #$05
-    sta PPU_DATA
-    lda #$06
-    sta PPU_DATA
-    lda #$07
-    sta PPU_DATA
-    lda #$08
-    sta PPU_DATA
-
-    lda #$26              ; $2400 + 21*32 + 0 = $26A0
-    sta PPU_ADDR
-    lda #$A0
-    sta PPU_ADDR
-    lda #$09
-    sta PPU_DATA
-    lda #$0A
-    sta PPU_DATA
-    lda #$0B
-    sta PPU_DATA
-    lda #$0C
-    sta PPU_DATA
-
-    ; Pipe body (rows 22-25)
-    ldx #22               ; Row counter
-@pipe_body:
-    ; Calculate high byte: $24 + (row / 8) for NT1
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc #$24              ; A = $24 + (row / 8) for NT1
-    sta PPU_ADDR
-    ; Calculate low byte: ((row & 7) * 32) + column
-    txa
-    and #$07              ; A = row & 7
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    ; Column 0, no addition needed
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    inx
-    cpx #26               ; End at row 25 (before ground at row 26)
-    bne @pipe_body
-
-    ; Set attributes for pipe 0 area in NT1 (palette 2)
-    ; Pipe at columns 0-3 is in attribute column 0
-    ;
-    ; Top pipe attributes:
-    ; Attr row 0 (tile rows 0-3): all pipe = $AA
-    ; Attr row 1 (tile rows 4-7): all pipe = $AA
-    ; Attr row 2 (tile rows 8-11): all pipe = $AA (cap ends at row 11)
-    ; Attr row 3 (tile rows 12-15): all gap = $00
-    lda #$27
-    sta PPU_ADDR
-    lda #$C0              ; Attribute row 0, column 0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$C8              ; Attribute row 1, column 0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$D0              ; Attribute row 2, column 0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ;
-    ; Bottom pipe attributes:
-    ; Attr row 5 (tile rows 20-23): all pipe = $AA
-    ; Attr row 6 (tile rows 24-27): top=pipe, bottom=ground = $5A
-    lda #$27
-    sta PPU_ADDR
-    lda #$E8              ; Attribute row 5, column 0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$F0              ; Attribute row 6, column 0
-    sta PPU_ADDR
-    lda #$5A              ; %01011010 = top palette 2, bottom palette 1
-    sta PPU_DATA
-
-    ; Draw pipe 1 in nametable 1 at column 16 (128px spacing from pipe 0)
-
-    ; Top pipe body (rows 0-9) using inverted body tiles
-    ldx #0                ; Row counter (start from ceiling)
-@pipe_top2:
-    ; Calculate high byte: $24 + (row / 8)
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc #$24              ; A = $24 + (row / 8)
-    sta PPU_ADDR
-    ; Calculate low byte: ((row & 7) * 32) + column
-    txa
-    and #$07              ; A = row & 7
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    clc
-    adc #16               ; + column 16
-    sta PPU_ADDR
-    lda #$19              ; Inverted body tiles
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    inx
-    cpx #10               ; End at row 9
-    bne @pipe_top2
-
-    ; Top pipe cap (rows 10-11) using inverted cap tiles
-    lda #$25              ; $2400 + 10*32 + 16 = $2550
-    sta PPU_ADDR
-    lda #$50
-    sta PPU_ADDR
-    lda #$15              ; Inverted cap row 1 (under lip)
-    sta PPU_DATA
-    lda #$16
-    sta PPU_DATA
-    lda #$17
-    sta PPU_DATA
-    lda #$18
-    sta PPU_DATA
-
-    lda #$25              ; $2400 + 11*32 + 16 = $2570
-    sta PPU_ADDR
-    lda #$70
-    sta PPU_ADDR
-    lda #$11              ; Inverted cap row 2 (lip edge)
-    sta PPU_DATA
-    lda #$12
-    sta PPU_DATA
-    lda #$13
-    sta PPU_DATA
-    lda #$14
-    sta PPU_DATA
-
-    ; Bottom pipe cap (rows 20-21)
-    lda #$26              ; $2400 + 20*32 + 16 = $2690
-    sta PPU_ADDR
-    lda #$90
-    sta PPU_ADDR
-    lda #$05
-    sta PPU_DATA
-    lda #$06
-    sta PPU_DATA
-    lda #$07
-    sta PPU_DATA
-    lda #$08
-    sta PPU_DATA
-
-    lda #$26              ; $2400 + 21*32 + 16 = $26B0
-    sta PPU_ADDR
-    lda #$B0
-    sta PPU_ADDR
-    lda #$09
-    sta PPU_DATA
-    lda #$0A
-    sta PPU_DATA
-    lda #$0B
-    sta PPU_DATA
-    lda #$0C
-    sta PPU_DATA
-
-    ; Pipe body (rows 22-25)
-    ldx #22               ; Row counter
-@pipe_body2:
-    ; Calculate high byte: $24 + (row / 8)
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc #$24              ; A = $24 + (row / 8)
-    sta PPU_ADDR
-    ; Calculate low byte: ((row & 7) * 32) + column
-    txa
-    and #$07              ; A = row & 7
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    clc
-    adc #16               ; + column 16
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    inx
-    cpx #26               ; End at row 25 (before ground at row 26)
-    bne @pipe_body2
-
-    ; Set attributes for pipe 1 in nametable 1 (column 4, covers tiles 16-19)
-    ; Top pipe attributes (cap ends at row 11, gap at 12-19)
-    lda #$27
-    sta PPU_ADDR
-    lda #$C4              ; Attribute row 0, column 4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$CC              ; Attribute row 1, column 4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$D4              ; Attribute row 2, column 4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Bottom pipe attributes
-    lda #$27
-    sta PPU_ADDR
-    lda #$EC              ; Attribute row 5, column 4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    lda #$27
-    sta PPU_ADDR
-    lda #$F4              ; Attribute row 6, column 4
-    sta PPU_ADDR
-    lda #$5A              ; %01011010 = top palette 2, bottom palette 1
-    sta PPU_DATA
+    ; Draw pipes in NT1 (initial screen is empty NT0)
+    lda #$24              ; NT1 base
+    sta nt_base
+    jsr draw_both_pipes
 
     ; Reset scroll position
     bit PPU_STATUS
@@ -728,8 +405,6 @@ game_loop:
     sta scroll_nt
     ; Check if we need to queue pipe redraw
     ; When switching TO NT1, NT0 just went off-screen - queue it for redraw
-    ; This ensures NT0 has pipes ready for next time it becomes visible
-    ; When switching TO NT0, NT1 keeps its pipes from init
     beq @no_scroll
     ; Switched to NT1 - NT0 just went off-screen, queue redraw
     lda #0
@@ -739,7 +414,6 @@ game_loop:
 
 @dying_state:
     ; Bird is dying - apply gravity but no input, no scrolling
-    ; Apply gravity to velocity
     lda bird_vel_lo
     clc
     adc #GRAVITY
@@ -748,7 +422,6 @@ game_loop:
     adc #0
     sta bird_vel_hi
 
-    ; Apply velocity to position
     lda bird_y_frac
     clc
     adc bird_vel_lo
@@ -757,10 +430,8 @@ game_loop:
     adc bird_vel_hi
     sta bird_y
 
-    ; Check ground collision
     cmp #GROUND_Y
     bcc @dying_no_ground
-    ; Hit ground - now dead
     lda #GROUND_Y
     sta bird_y
     lda #0
@@ -771,7 +442,6 @@ game_loop:
     sta game_state
 @dying_no_ground:
 
-    ; Update sprite Y positions
     lda bird_y
     sta OAM_BUFFER+0
     sta OAM_BUFFER+4
@@ -791,8 +461,7 @@ game_loop:
     jsr read_controller
     lda buttons_new
     and #(BUTTON_A | BUTTON_B)
-    beq @waiting_done         ; No button pressed, keep waiting
-    ; Button pressed - start the game!
+    beq @waiting_done
     lda #STATE_PLAYING
     sta game_state
 @waiting_done:
@@ -812,14 +481,12 @@ nmi:
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
 
-    ; Check if we need to redraw pipes
+    ; Check if we need to redraw pipes (two-frame approach)
+    ; draw_pipes_in_nt manages pipe_redraw state internally
     lda pipe_redraw
     cmp #$FF
     beq @no_pipe_redraw
-    ; Redraw pipes in the queued nametable
     jsr draw_pipes_in_nt
-    lda #$FF
-    sta pipe_redraw       ; Clear the flag
 @no_pipe_redraw:
 
     ; Set scroll position
@@ -962,161 +629,112 @@ check_pipe_collision:
 ; Pipe Drawing (called from NMI during vblank)
 ;===============================================================================
 draw_pipes_in_nt:
-    ; Draw pipes in nametable specified by pipe_redraw (0 or 1)
-    ; Currently only handles NT0 redraw (pipe_redraw = 0)
-    ; Draws pipe 0 at column 0 and pipe 1 at column 16
-    ;
-    ; For NT0: base address $20, attribute base $23C0
-    ; For NT1: base address $24, attribute base $27C0
-    ;
-    ; This is optimized for speed - uses direct writes instead of loops
+    ; Two-frame pipe redraw to fit in vblank
+    ; pipe_redraw = 0: draw pipe 0, then set to 1
+    ; pipe_redraw = 1: draw pipe 1, then set to $FF (done)
+    ; pipe_redraw = $FF: skip (checked by NMI before calling)
+
+    lda #$20              ; NT0 base (only NT0 redraws for now)
+    sta nt_base
+
+    bit PPU_STATUS        ; Reset PPU latch
 
     lda pipe_redraw
-    beq @draw_nt0
-    ; NT1 already has pipes from init, skip for now
+    bne @draw_pipe1
+
+    ; Frame 1: Draw pipe 0
+    lda #0
+    sta pipe_col
+    jsr draw_pipe
+    jsr draw_pipe0_attrs_only
+    lda #1
+    sta pipe_redraw       ; Next frame: draw pipe 1
     rts
 
-@draw_nt0:
-    ; ===== Draw pipes in NT0 =====
-    ; Pipe 0 at column 0
+@draw_pipe1:
+    ; Frame 2: Draw pipe 1
+    lda #16
+    sta pipe_col
+    jsr draw_pipe
+    jsr draw_pipe1_attrs_only
+    lda #$FF
+    sta pipe_redraw       ; Done
+    rts
 
-    ; Top pipe body rows 0-9 (10 rows, 4 tiles each)
-    ; Row 0: $2000
-    lda #$20
-    sta PPU_ADDR
-    lda #$00
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 1: $2020
-    lda #$20
-    sta PPU_ADDR
-    lda #$20
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 2: $2040
-    lda #$20
-    sta PPU_ADDR
-    lda #$40
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 3: $2060
-    lda #$20
-    sta PPU_ADDR
-    lda #$60
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 4: $2080
-    lda #$20
-    sta PPU_ADDR
-    lda #$80
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 5: $20A0
-    lda #$20
-    sta PPU_ADDR
-    lda #$A0
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 6: $20C0
-    lda #$20
-    sta PPU_ADDR
-    lda #$C0
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 7: $20E0
-    lda #$20
-    sta PPU_ADDR
-    lda #$E0
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 8: $2100
-    lda #$21
-    sta PPU_ADDR
-    lda #$00
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 9: $2120
-    lda #$21
-    sta PPU_ADDR
-    lda #$20
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
+;===============================================================================
+; Unified Pipe Drawing
+; Uses: nt_base ($20=NT0, $24=NT1), pipe_col (0 or 16)
+;===============================================================================
 
-    ; Top pipe cap rows 10-11
-    ; Row 10: $2140
-    lda #$21
+;---------------------------------------
+; Draw both pipes in the nametable specified by nt_base
+; Used during init (outside vblank, no time constraint)
+;---------------------------------------
+draw_both_pipes:
+    ; Reset PPU address latch before drawing
+    bit PPU_STATUS
+
+    ; Draw pipe 0 at column 0
+    lda #0
+    sta pipe_col
+    jsr draw_pipe
+
+    ; Draw pipe 1 at column 16
+    lda #16
+    sta pipe_col
+    jsr draw_pipe
+
+    ; Draw attributes for both pipes
+    jsr draw_all_pipe_attrs
+    rts
+
+;---------------------------------------
+; Draw a single pipe at nt_base + pipe_col
+; Top body rows 0-9, cap rows 10-11
+; Gap rows 12-19 (not drawn, sky shows through)
+; Bottom cap rows 20-21, body rows 22-25
+;---------------------------------------
+draw_pipe:
+    ; Top pipe body (rows 0-9)
+    ldx #0
+@top_body:
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc nt_base           ; A = nt_base + (row / 8)
     sta PPU_ADDR
-    lda #$40
+    txa
+    and #$07
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc pipe_col          ; + column
+    sta PPU_ADDR
+    lda #$19
+    sta PPU_DATA
+    lda #$1A
+    sta PPU_DATA
+    lda #$1B
+    sta PPU_DATA
+    lda #$1C
+    sta PPU_DATA
+    inx
+    cpx #10
+    bne @top_body
+
+    ; Top pipe cap row 10 (under lip)
+    lda nt_base
+    clc
+    adc #1                ; row 10 is in page +1
+    sta PPU_ADDR
+    lda #$40              ; row 10: (10 & 7) * 32 = 2 * 32 = 64 = $40
+    clc
+    adc pipe_col
     sta PPU_ADDR
     lda #$15
     sta PPU_DATA
@@ -1126,10 +744,15 @@ draw_pipes_in_nt:
     sta PPU_DATA
     lda #$18
     sta PPU_DATA
-    ; Row 11: $2160
-    lda #$21
+
+    ; Top pipe cap row 11 (lip edge)
+    lda nt_base
+    clc
+    adc #1                ; row 11 is in page +1
     sta PPU_ADDR
-    lda #$60
+    lda #$60              ; row 11: (11 & 7) * 32 = 3 * 32 = 96 = $60
+    clc
+    adc pipe_col
     sta PPU_ADDR
     lda #$11
     sta PPU_DATA
@@ -1140,11 +763,14 @@ draw_pipes_in_nt:
     lda #$14
     sta PPU_DATA
 
-    ; Bottom pipe cap rows 20-21
-    ; Row 20: $2280
-    lda #$22
+    ; Bottom pipe cap row 20
+    lda nt_base
+    clc
+    adc #2                ; row 20 is in page +2
     sta PPU_ADDR
-    lda #$80
+    lda #$80              ; row 20: (20 & 7) * 32 = 4 * 32 = 128 = $80
+    clc
+    adc pipe_col
     sta PPU_ADDR
     lda #$05
     sta PPU_DATA
@@ -1154,10 +780,15 @@ draw_pipes_in_nt:
     sta PPU_DATA
     lda #$08
     sta PPU_DATA
-    ; Row 21: $22A0
-    lda #$22
+
+    ; Bottom pipe cap row 21
+    lda nt_base
+    clc
+    adc #2                ; row 21 is in page +2
     sta PPU_ADDR
-    lda #$A0
+    lda #$A0              ; row 21: (21 & 7) * 32 = 5 * 32 = 160 = $A0
+    clc
+    adc pipe_col
     sta PPU_ADDR
     lda #$09
     sta PPU_DATA
@@ -1168,37 +799,25 @@ draw_pipes_in_nt:
     lda #$0C
     sta PPU_DATA
 
-    ; Bottom pipe body rows 22-25
-    ; Row 22: $22C0
-    lda #$22
+    ; Bottom pipe body (rows 22-25)
+    ldx #22
+@bot_body:
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc nt_base           ; A = nt_base + (row / 8)
     sta PPU_ADDR
-    lda #$C0
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    ; Row 23: $22E0
-    lda #$22
-    sta PPU_ADDR
-    lda #$E0
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    ; Row 24: $2300
-    lda #$23
-    sta PPU_ADDR
-    lda #$00
+    txa
+    and #$07
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc pipe_col          ; + column
     sta PPU_ADDR
     lda #$0D
     sta PPU_DATA
@@ -1208,328 +827,205 @@ draw_pipes_in_nt:
     sta PPU_DATA
     lda #$10
     sta PPU_DATA
-    ; Row 25: $2320
-    lda #$23
-    sta PPU_ADDR
-    lda #$20
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
+    inx
+    cpx #26
+    bne @bot_body
 
-    ; Set attributes for pipe 0 in NT0 (column 0)
-    lda #$23
+    rts
+
+;---------------------------------------
+; DEBUG: Draw attributes for pipe 0 only (faster)
+;---------------------------------------
+draw_pipe0_attrs_only:
+    lda nt_base
+    clc
+    adc #3
+    sta nt_base           ; attr base
+
+    lda nt_base
     sta PPU_ADDR
     lda #$C0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$C8
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$D0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$E8
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$F0
     sta PPU_ADDR
     lda #$5A
     sta PPU_DATA
 
-    ; ===== Pipe 1 at column 16 in NT0 =====
-    ; (Similar pattern but at column 16, addresses offset by 16)
+    ; Restore nt_base
+    lda nt_base
+    sec
+    sbc #3
+    sta nt_base
+    rts
 
-    ; Top pipe body rows 0-9
-    ; Row 0: $2010
-    lda #$20
-    sta PPU_ADDR
-    lda #$10
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 1: $2030
-    lda #$20
-    sta PPU_ADDR
-    lda #$30
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 2: $2050
-    lda #$20
-    sta PPU_ADDR
-    lda #$50
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 3: $2070
-    lda #$20
-    sta PPU_ADDR
-    lda #$70
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 4: $2090
-    lda #$20
-    sta PPU_ADDR
-    lda #$90
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 5: $20B0
-    lda #$20
-    sta PPU_ADDR
-    lda #$B0
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 6: $20D0
-    lda #$20
-    sta PPU_ADDR
-    lda #$D0
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 7: $20F0
-    lda #$20
-    sta PPU_ADDR
-    lda #$F0
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 8: $2110
-    lda #$21
-    sta PPU_ADDR
-    lda #$10
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
-    ; Row 9: $2130
-    lda #$21
-    sta PPU_ADDR
-    lda #$30
-    sta PPU_ADDR
-    lda #$19
-    sta PPU_DATA
-    lda #$1A
-    sta PPU_DATA
-    lda #$1B
-    sta PPU_DATA
-    lda #$1C
-    sta PPU_DATA
+;---------------------------------------
+; Draw attributes for pipe 1 only (column 4)
+;---------------------------------------
+draw_pipe1_attrs_only:
+    lda nt_base
+    clc
+    adc #3
+    sta nt_base           ; attr base
 
-    ; Top pipe cap rows 10-11
-    ; Row 10: $2150
-    lda #$21
-    sta PPU_ADDR
-    lda #$50
-    sta PPU_ADDR
-    lda #$15
-    sta PPU_DATA
-    lda #$16
-    sta PPU_DATA
-    lda #$17
-    sta PPU_DATA
-    lda #$18
-    sta PPU_DATA
-    ; Row 11: $2170
-    lda #$21
-    sta PPU_ADDR
-    lda #$70
-    sta PPU_ADDR
-    lda #$11
-    sta PPU_DATA
-    lda #$12
-    sta PPU_DATA
-    lda #$13
-    sta PPU_DATA
-    lda #$14
-    sta PPU_DATA
-
-    ; Bottom pipe cap rows 20-21
-    ; Row 20: $2290
-    lda #$22
-    sta PPU_ADDR
-    lda #$90
-    sta PPU_ADDR
-    lda #$05
-    sta PPU_DATA
-    lda #$06
-    sta PPU_DATA
-    lda #$07
-    sta PPU_DATA
-    lda #$08
-    sta PPU_DATA
-    ; Row 21: $22B0
-    lda #$22
-    sta PPU_ADDR
-    lda #$B0
-    sta PPU_ADDR
-    lda #$09
-    sta PPU_DATA
-    lda #$0A
-    sta PPU_DATA
-    lda #$0B
-    sta PPU_DATA
-    lda #$0C
-    sta PPU_DATA
-
-    ; Bottom pipe body rows 22-25
-    ; Row 22: $22D0
-    lda #$22
-    sta PPU_ADDR
-    lda #$D0
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    ; Row 23: $22F0
-    lda #$22
-    sta PPU_ADDR
-    lda #$F0
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    ; Row 24: $2310
-    lda #$23
-    sta PPU_ADDR
-    lda #$10
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-    ; Row 25: $2330
-    lda #$23
-    sta PPU_ADDR
-    lda #$30
-    sta PPU_ADDR
-    lda #$0D
-    sta PPU_DATA
-    lda #$0E
-    sta PPU_DATA
-    lda #$0F
-    sta PPU_DATA
-    lda #$10
-    sta PPU_DATA
-
-    ; Set attributes for pipe 1 in NT0 (column 4)
-    lda #$23
+    lda nt_base
     sta PPU_ADDR
     lda #$C4
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$CC
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$D4
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$EC
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
-    lda #$23
+
+    lda nt_base
     sta PPU_ADDR
     lda #$F4
     sta PPU_ADDR
     lda #$5A
     sta PPU_DATA
+
+    ; Restore nt_base
+    lda nt_base
+    sec
+    sbc #3
+    sta nt_base
+    rts
+
+;---------------------------------------
+; Draw attributes for both pipes
+; Pipe 0 at attr column 0, Pipe 1 at attr column 4
+; Attr base = nt_base + 3, offset $C0
+;---------------------------------------
+draw_all_pipe_attrs:
+    ; Calculate attribute base high byte
+    lda nt_base
+    clc
+    adc #3
+    sta nt_base           ; Temporarily use nt_base as attr base (will restore)
+
+    ; --- Pipe 0 attributes (column 0) ---
+    ; Attr row 0
+    lda nt_base
+    sta PPU_ADDR
+    lda #$C0
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 1
+    lda nt_base
+    sta PPU_ADDR
+    lda #$C8
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 2
+    lda nt_base
+    sta PPU_ADDR
+    lda #$D0
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 5
+    lda nt_base
+    sta PPU_ADDR
+    lda #$E8
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 6 (pipe/ground)
+    lda nt_base
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR
+    lda #$5A
+    sta PPU_DATA
+
+    ; --- Pipe 1 attributes (column 4) ---
+    ; Attr row 0
+    lda nt_base
+    sta PPU_ADDR
+    lda #$C4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 1
+    lda nt_base
+    sta PPU_ADDR
+    lda #$CC
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 2
+    lda nt_base
+    sta PPU_ADDR
+    lda #$D4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 5
+    lda nt_base
+    sta PPU_ADDR
+    lda #$EC
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    ; Attr row 6 (pipe/ground)
+    lda nt_base
+    sta PPU_ADDR
+    lda #$F4
+    sta PPU_ADDR
+    lda #$5A
+    sta PPU_DATA
+
+    ; Restore nt_base (subtract 3)
+    lda nt_base
+    sec
+    sbc #3
+    sta nt_base
 
     rts
 

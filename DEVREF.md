@@ -140,35 +140,57 @@ Spacing: 384 - 256 = 128 pixels
 
 ## Pipe Redraw on Scroll Loop
 
-**Decision:** Redraw pipes dynamically when the off-screen nametable needs to be prepared.
+**Decision:** Redraw pipes dynamically when the off-screen nametable needs to be prepared, split across two frames to fit within vblank.
 
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
-| pipe_redraw | $0B | Nametable to redraw (0, 1, or $FF=none) |
+| pipe_redraw | $0B | Redraw state: 0=pipe 0, 1=pipe 1, $FF=none |
+| nt_base | $0C | Nametable base ($20=NT0, $24=NT1) |
+| pipe_col | $0D | Current pipe column (0 or 16) |
 
 **Mechanism:**
 1. Initial state: NT0 empty, NT1 has both pipes
 2. When scroll_x wraps (255→0), toggle scroll_nt
-3. When switching TO NT1: NT0 just scrolled off-screen, queue NT0 for redraw
+3. When switching TO NT1: NT0 just scrolled off-screen, set pipe_redraw=0
 4. When switching TO NT0: Do nothing (NT1 keeps its pipes from init)
 5. NMI handler checks pipe_redraw and calls draw_pipes_in_nt if needed
 
 **Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view.
 
+**Two-Frame Redraw:**
+
+Drawing both pipes (~2560 cycles) exceeds the available vblank time (~1760 cycles after OAM DMA). Writing to VRAM outside vblank causes visual glitches. Solution: split across two frames.
+
+```
+Frame N:   pipe_redraw=0 → draw pipe 0 + attrs → set pipe_redraw=1
+Frame N+1: pipe_redraw=1 → draw pipe 1 + attrs → set pipe_redraw=$FF
+```
+
+| Frame | What | Cycles |
+|-------|------|--------|
+| 1 | Pipe 0 + attributes | ~1280 |
+| 2 | Pipe 1 + attributes | ~1280 |
+
+Each frame fits within the ~1760 cycle budget. The 1-frame delay (1/60th second) between pipes is invisible to the player.
+
 **Timing:**
 ```
-NT0 (empty) visible → scroll → switch to NT1 → queue NT0 redraw
-NT1 (pipes) visible → NT0 redrawn during vblank → scroll → switch to NT0
-NT0 (now has pipes) visible → scroll → switch to NT1 → queue NT0 redraw
+NT0 (empty) visible → scroll → switch to NT1 → pipe_redraw=0
+NT1 visible, NMI draws pipe 0 in NT0 → pipe_redraw=1
+NT1 visible, NMI draws pipe 1 in NT0 → pipe_redraw=$FF
+... scroll continues ...
+NT0 (now has pipes) visible → scroll → switch to NT1 → pipe_redraw=0
 ... continues seamlessly
 ```
 
-**NMI cycle budget:**
-- Pipe redraw uses ~1000 VRAM write cycles
-- VBlank budget: ~2273 cycles
-- After OAM DMA (~513 cycles), ~1760 cycles remain
-- Pipe redraw fits comfortably within single VBlank
+**Cycle Budget:**
+```
+VBlank total:     ~2273 cycles
+OAM DMA:          - 513 cycles
+Available:        ~1760 cycles
+Per-pipe redraw:  ~1280 cycles  ✓ fits
+```
 
 ## Bird Sprite: 16x16 (4 tiles)
 
