@@ -118,10 +118,18 @@ reset:
     sta bird_vel_lo
     sta bird_vel_hi
 
-    ; Initialize pipe gap (start of cycle)
-    lda #GAP_MIN
-    sta pipe_gap
-    sta pipe0_drawn_gap   ; Initial collision gap
+    ; Initialize LFSR with non-zero seed
+    lda #$01
+    sta rng_lo
+    lda #$A5              ; Arbitrary non-zero seed
+    sta rng_hi
+
+    ; Initialize pipe gaps
+    ; NT0 starts empty - flag prevents collision checks until drawn
+    lda #0
+    sta nt0_has_pipes
+    ; NT1 gaps will be set by draw_pipes_in_nt during init
+    jsr next_pipe_gap     ; Set initial pipe_gap for NT1 pipe 0
 
     ; Initialize sprite Y positions from bird_y
     lda bird_y
@@ -477,6 +485,8 @@ game_loop:
 
 @waiting_state:
     ; Waiting for player to press A or B to start
+    ; Run LFSR each frame to gather entropy from player timing
+    jsr rand_lfsr
     jsr read_controller
     lda buttons_new
     and #(BUTTON_A | BUTTON_B)
@@ -570,66 +580,91 @@ read_controller:
 ; Pipe Collision Detection
 ;===============================================================================
 check_pipe_collision:
-    ; Both pipes are in NT1:
-    ; Pipe 0: NT1 column 0 = world pixel 256
-    ; Pipe 1: NT1 column 16 = world pixel 384
+    ; Pipes are in both nametables:
+    ; NT0 pipe 0: world X 0,    NT0 pipe 1: world X 128
+    ; NT1 pipe 0: world X 256,  NT1 pipe 1: world X 384
     ;
-    ; When scroll_nt = 0: viewing NT0, pipes in NT1 are to the right
-    ;   pipe0_screen_x = 256 - scroll_x (visible when scroll_x > 0)
-    ; When scroll_nt = 1: viewing NT1, pipes are here
-    ;   pipe0_screen_x = 0 - scroll_x (visible when scroll_x < 32)
+    ; Check pipes based on scroll position. Bird is at screen X 56-72.
+    ; A pipe overlaps if its screen_x is in range [25, 72] (accounting for 32px width)
 
     lda scroll_nt
-    bne @nt1_view
+    bne @viewing_nt1
 
-    ; Viewing NT0: pipe 0 is at screen_x = 256 - scroll_x
-    ; If scroll_x = 0, pipe is at 256 (off screen right)
-    ; If scroll_x = 200, pipe is at 56 (visible)
-    lda scroll_x
-    beq @no_collision     ; scroll_x = 0, pipe off screen right
-    ; pipe_x = 256 - scroll_x, but in 8-bit: (0 - scroll_x) wraps correctly
-    lda #0
+@viewing_nt0:
+    ; When viewing NT0, check:
+    ; 1. NT0 pipe 1: screen_x = 128 - scroll_x (visible when scroll_x in ~[56, 103])
+    ; 2. NT1 pipe 0: screen_x = 256 - scroll_x (visible when scroll_x in ~[184, 231])
+
+    ; Skip NT0 pipes if NT0 hasn't been drawn yet
+    lda nt0_has_pipes
+    beq @check_nt1_pipe0
+
+    ; Check NT0 pipe 1
+    lda #128
     sec
-    sbc scroll_x          ; A = 256 - scroll_x (due to borrow from bit 8)
-    jmp @check_x_overlap
-
-@nt1_view:
-    ; Viewing NT1: pipe 0 is at screen_x = 0 - scroll_x
-    ; If scroll_x = 0, pipe is at 0 (visible)
-    ; If scroll_x > 32, pipe is off screen left
-    lda scroll_x
-    cmp #32
-    bcs @no_collision     ; scroll_x >= 32, pipe off screen left
-    ; pipe_x = 0 - scroll_x (negative, but we handle it)
-    lda #0
-    sec
-    sbc scroll_x          ; A = -scroll_x (wrapped to 256-scroll_x, but for small scroll_x this works)
-
-@check_x_overlap:
-    ; A = pipe_x (left edge of pipe)
-    ; Check if bird (X=56-72) overlaps pipe (X=pipe_x to pipe_x+32)
-    ; Bird overlaps if: pipe_x < bird_right (72) AND pipe_x + 32 > bird_left (56)
-
-    ; Check: pipe_x >= 72 means no overlap (pipe is to the right)
+    sbc scroll_x          ; A = 128 - scroll_x
     cmp #BIRD_RIGHT
-    bcs @no_collision     ; pipe_x >= 72, no overlap
-
-    ; Check: pipe_x + 32 <= 56 means no overlap (pipe is to the left)
-    ; pipe_x + 32 <= 56 means pipe_x <= 24
+    bcs @check_nt1_pipe0  ; screen_x >= 72, pipe to the right, check next
     cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
-    bcc @no_collision     ; pipe_x < 25, pipe is to the left
+    bcc @check_nt1_pipe0  ; screen_x < 25, pipe to the left, check next
+    ; X overlaps with NT0 pipe 1
+    lda nt0_pipe1_gap
+    jmp @check_y
 
-    ; X overlaps! Now check Y
-    ; Bird must be OUTSIDE the gap to collide
-    ; Gap top Y = pipe0_drawn_gap * 8
-    ; Gap bottom Y = (pipe0_drawn_gap + 8) * 8
-    ; Bird is 16px tall
+@check_nt1_pipe0:
+    ; Check NT1 pipe 0: screen_x = 256 - scroll_x (wraps in 8-bit)
+    lda #0
+    sec
+    sbc scroll_x          ; A = 256 - scroll_x (8-bit wrap)
+    cmp #BIRD_RIGHT
+    bcs @no_collision     ; screen_x >= 72, no overlap
+    cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
+    bcc @no_collision     ; screen_x < 25, no overlap
+    ; X overlaps with NT1 pipe 0
+    lda nt1_pipe0_gap
+    jmp @check_y
 
-    ; Calculate gap_top_y = pipe0_drawn_gap * 8
-    lda pipe0_drawn_gap
+@viewing_nt1:
+    ; When viewing NT1, check:
+    ; 1. NT1 pipe 1: screen_x = 128 - scroll_x (visible when scroll_x in ~[56, 103])
+    ; 2. NT0 pipe 0: screen_x = 256 - scroll_x (visible when scroll_x in ~[184, 231])
+
+    ; Check NT1 pipe 1
+    lda #128
+    sec
+    sbc scroll_x          ; A = 128 - scroll_x
+    cmp #BIRD_RIGHT
+    bcs @check_nt0_pipe0  ; screen_x >= 72, check next
+    cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
+    bcc @check_nt0_pipe0  ; screen_x < 25, check next
+    ; X overlaps with NT1 pipe 1
+    lda nt1_pipe1_gap
+    jmp @check_y
+
+@check_nt0_pipe0:
+    ; Skip NT0 pipes if NT0 hasn't been drawn yet
+    lda nt0_has_pipes
+    beq @no_collision
+
+    ; Check NT0 pipe 0: screen_x = 256 - scroll_x (wraps in 8-bit)
+    lda #0
+    sec
+    sbc scroll_x          ; A = 256 - scroll_x
+    cmp #BIRD_RIGHT
+    bcs @no_collision     ; screen_x >= 72, no overlap
+    cmp #(BIRD_LEFT - PIPE_WIDTH + 1)
+    bcc @no_collision     ; screen_x < 25, no overlap
+    ; X overlaps with NT0 pipe 0
+    lda nt0_pipe0_gap
+    jmp @check_y
+
+@check_y:
+    ; A = gap row for the overlapping pipe
+    ; Calculate gap_top_y = gap * 8
     asl a
     asl a
     asl a                 ; A = gap * 8 = gap_top_y
+    sta pipe0_drawn_gap   ; Temp storage for gap_top_y
 
     ; Check if bird_y < gap_top_y (hit top pipe)
     cmp bird_y
@@ -638,11 +673,8 @@ check_pipe_collision:
     jmp @collision        ; bird_y < gap_top_y, hit top pipe
 
 @check_bottom:
-    ; Calculate gap_bottom_y - 16 = gap * 8 + 64 - 16 = gap * 8 + 48
-    lda pipe0_drawn_gap
-    asl a
-    asl a
-    asl a                 ; A = gap * 8
+    ; Calculate gap_bottom_y - 16 = gap_top_y + 64 - 16 = gap_top_y + 48
+    lda pipe0_drawn_gap   ; gap_top_y
     clc
     adc #(GAP_ROWS * 8 - 16)  ; A = gap_top_y + 48
     cmp bird_y
@@ -705,8 +737,20 @@ draw_pipes_in_nt:
     ; Frame 1: Draw pipe 0 body+cap
     lda #0
     sta pipe_col
+    ; Save gap to correct per-nametable variable
+    lda nt_base
+    cmp #$24
+    beq @frame0_nt1
+    ; NT0 - save gap and mark as having pipes
     lda pipe_gap
-    sta pipe0_drawn_gap   ; Save gap for collision detection
+    sta nt0_pipe0_gap
+    lda #1
+    sta nt0_has_pipes     ; NT0 now has pipes
+    jmp @frame0_draw
+@frame0_nt1:
+    lda pipe_gap
+    sta nt1_pipe0_gap     ; NT1 pipe 0
+@frame0_draw:
     jsr draw_pipe_body_cap
     lda #1
     sta pipe_redraw
@@ -738,6 +782,17 @@ draw_pipes_in_nt:
     ; Frame 5: Draw pipe 1 body+cap
     lda #16
     sta pipe_col
+    ; Save gap to correct per-nametable variable
+    lda nt_base
+    cmp #$24
+    beq @frame4_nt1
+    lda pipe_gap
+    sta nt0_pipe1_gap     ; NT0 pipe 1
+    jmp @frame4_draw
+@frame4_nt1:
+    lda pipe_gap
+    sta nt1_pipe1_gap     ; NT1 pipe 1
+@frame4_draw:
     jsr draw_pipe_body_cap
     lda #5
     sta pipe_redraw
@@ -758,16 +813,42 @@ draw_pipes_in_nt:
     rts
 
 ;---------------------------------------
-; Increment pipe_gap, wrap at max
+; Set pipe_gap to random value (GAP_MIN to GAP_MAX)
+; Uses LFSR for pseudo-random generation
 ;---------------------------------------
 next_pipe_gap:
-    inc pipe_gap
-    lda pipe_gap
-    cmp #(GAP_MAX + 1)
-    bcc @done
-    lda #GAP_MIN          ; Wrap to min
+    jsr rand_lfsr         ; Get next random value
+    lda rng_lo
+    eor rng_hi            ; Mix both bytes for better distribution
+    and #$0F              ; 0-15
+    cmp #(GAP_MAX - GAP_MIN + 1)
+    bcc @in_range         ; < 12, use as-is
+    ; Value 12-15, subtract 8 to get 4-7
+    sec
+    sbc #8
+@in_range:
+    clc
+    adc #GAP_MIN          ; Add base (4)
     sta pipe_gap
-@done:
+    rts
+
+;---------------------------------------
+; 16-bit LFSR (Galois)
+; Taps: bits 16, 14, 13, 11 (polynomial $B400)
+; Period: 65535
+; ~30 cycles - negligible for vblank
+;---------------------------------------
+rand_lfsr:
+    lda rng_lo
+    lsr a                 ; Shift right, bit 0 -> carry
+    ror rng_hi            ; Rotate high byte
+    ror rng_lo            ; Rotate low byte
+    bcc @no_tap           ; If carry clear, skip XOR
+    ; XOR with $B4 on high byte (taps for maximal LFSR)
+    lda rng_hi
+    eor #$B4
+    sta rng_hi
+@no_tap:
     rts
 
 ;===============================================================================

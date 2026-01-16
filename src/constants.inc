@@ -26,6 +26,17 @@ pipe_col    = $0D       ; Current pipe column (0 or 16)
 pipe_gap    = $0E       ; Gap start row (for drawing)
 pipe0_drawn_gap = $0F   ; Gap of pipe 0 when it was drawn (for collision)
 
+; Random number generator (16-bit LFSR)
+rng_lo      = $10       ; LFSR low byte
+rng_hi      = $11       ; LFSR high byte
+
+; Per-nametable pipe gap tracking (for collision detection)
+nt0_pipe0_gap = $12     ; NT0 pipe 0 gap row
+nt0_pipe1_gap = $13     ; NT0 pipe 1 gap row
+nt1_pipe0_gap = $14     ; NT1 pipe 0 gap row
+nt1_pipe1_gap = $15     ; NT1 pipe 1 gap row
+nt0_has_pipes = $16     ; 0 = NT0 empty, 1 = NT0 has pipes
+
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row
 GAP_ROWS    = 8         ; Gap size in rows (64 pixels)

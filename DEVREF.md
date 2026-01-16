@@ -148,8 +148,15 @@ Spacing: 384 - 256 = 128 pixels
 | pipe_redraw | $0B | Redraw state: 0-7=active frame, $FF=none |
 | nt_base | $0C | Nametable base ($20=NT0, $24=NT1) |
 | pipe_col | $0D | Current pipe column (0 or 16) |
-| pipe_gap | $0E | Gap start row (cycles through GAP_MIN to GAP_MAX) |
-| pipe0_drawn_gap | $0F | Saved gap for collision detection |
+| pipe_gap | $0E | Gap start row (random, GAP_MIN to GAP_MAX) |
+| pipe0_drawn_gap | $0F | Temp storage for collision Y check |
+| rng_lo | $10 | LFSR low byte |
+| rng_hi | $11 | LFSR high byte |
+| nt0_pipe0_gap | $12 | NT0 pipe 0 gap row |
+| nt0_pipe1_gap | $13 | NT0 pipe 1 gap row |
+| nt1_pipe0_gap | $14 | NT1 pipe 0 gap row |
+| nt1_pipe1_gap | $15 | NT1 pipe 1 gap row |
+| nt0_has_pipes | $16 | 0 = NT0 empty, 1 = NT0 has pipes |
 
 **Mechanism:**
 1. Initial state: NT0 empty, NT1 has both pipes
@@ -301,11 +308,91 @@ Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time 
 - Ground collision → STATE_DEAD (fully frozen)
 
 **Pipe collision detection:**
-- Calculate pipe X from scroll: `pipe_x = 128 - scroll_x`
-- Check X overlap: bird (56-72) vs pipe (pipe_x to pipe_x+32)
-- Check Y overlap: bird outside gap (Y < 96 or Y > 144)
+- Check all 4 pipes (2 per nametable) based on scroll position
+- Use per-nametable gap tracking for correct collision
+- Skip NT0 collision checks until NT0 has been drawn (`nt0_has_pipes` flag)
 
 **Future:** Press Start to reset game.
+
+## Random Pipe Heights
+
+**Decision:** Use 16-bit Galois LFSR for pseudo-random pipe gap positions.
+
+**LFSR Implementation:**
+```
+Polynomial: $B400 (taps at bits 16, 14, 13, 11)
+Period: 65535 (maximal length)
+Seed: $A501 (arbitrary non-zero)
+```
+
+**Algorithm:**
+```asm
+rand_lfsr:
+    lda rng_lo
+    lsr a                 ; Shift right, bit 0 -> carry
+    ror rng_hi            ; Rotate high byte
+    ror rng_lo            ; Rotate low byte
+    bcc @no_tap           ; If carry clear, skip XOR
+    lda rng_hi
+    eor #$B4              ; Apply taps
+    sta rng_hi
+@no_tap:
+    rts
+```
+
+**Gap Range Mapping:**
+```asm
+    lda rng_lo
+    eor rng_hi            ; Mix bytes for better distribution
+    and #$0F              ; 0-15
+    ; Map to GAP_MIN..GAP_MAX (4-15)
+    ; Values 12-15 wrap to 4-7
+```
+
+**Entropy Source:**
+- LFSR runs every frame during STATE_WAITING
+- Player's timing to press start determines initial LFSR state
+- Each game has different random sequence based on wait time
+
+**Cycle Cost:** ~50 cycles per call (negligible for vblank)
+
+## Per-Nametable Collision Detection
+
+**Decision:** Track gap values separately for each pipe in each nametable.
+
+**Why needed:**
+- Both nametables have pipes after first scroll loop
+- Single gap variable would be overwritten on each redraw
+- Collision must check the correct gap for the visible pipe
+
+**Variables:**
+| Variable | Description |
+|----------|-------------|
+| nt0_pipe0_gap | NT0 pipe at column 0 |
+| nt0_pipe1_gap | NT0 pipe at column 16 |
+| nt1_pipe0_gap | NT1 pipe at column 0 |
+| nt1_pipe1_gap | NT1 pipe at column 16 |
+| nt0_has_pipes | Skip NT0 collision until drawn |
+
+**Collision Check Order:**
+```
+When scroll_nt = 0 (viewing NT0):
+  1. Check NT0 pipe 1 (screen_x = 128 - scroll_x)
+  2. Check NT1 pipe 0 (screen_x = 256 - scroll_x)
+
+When scroll_nt = 1 (viewing NT1):
+  1. Check NT1 pipe 1 (screen_x = 128 - scroll_x)
+  2. Check NT0 pipe 0 (screen_x = 256 - scroll_x)
+```
+
+**X Overlap Test:**
+- Pipe overlaps bird if screen_x in [25, 72]
+- Bird X range: 56-72, pipe width: 32px
+
+**Y Overlap Test:**
+- gap_top_y = gap_row × 8
+- gap_bottom_y = gap_top_y + 64
+- Collision if bird_y < gap_top_y OR bird_y > gap_bottom_y - 16
 
 ## Scrolling
 
