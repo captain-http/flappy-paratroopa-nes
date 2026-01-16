@@ -165,7 +165,7 @@ Spacing: 384 - 256 = 128 pixels
 4. When switching TO NT0: NT1 just scrolled off-screen, queue NT1 redraw
 5. NMI handler checks pipe_redraw and calls draw_pipes_in_nt if needed
 
-**Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view (~4.3 seconds at 1px/frame).
+**Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view (~2.1 seconds at 2px/frame).
 
 **Eight-Frame Redraw:**
 
@@ -385,18 +385,39 @@ When scroll_nt = 1 (viewing NT1):
   2. Check NT0 pipe 0 (screen_x = 256 - scroll_x)
 ```
 
+**Rectangle Collision Detection:**
+
+Bird and pipes are treated as axis-aligned rectangles:
+```
+Bird:        (56, bird_y) to (72, bird_y+16)  [16x16 pixels]
+Top pipe:    (pipe_x, 0) to (pipe_x+32, gap_top_y)
+Bottom pipe: (pipe_x, gap_top_y+64) to (pipe_x+32, ground)
+```
+
 **X Overlap Test:**
 - Pipe overlaps bird if screen_x in [25, 72]
 - Bird X range: 56-72, pipe width: 32px
+- Formula: `BIRD_LEFT - PIPE_WIDTH + 1` to `BIRD_RIGHT - 1`
 
-**Y Overlap Test:**
-- gap_top_y = gap_row × 8
-- gap_bottom_y = gap_top_y + 64
-- Collision if bird_y < gap_top_y OR bird_y > gap_bottom_y - 16
+**Y Overlap Test (Rectangle-based):**
+```
+gap_top_y = gap_row × 8
+gap_bottom_y = gap_top_y + 64
+
+Bird safe if BOTH conditions met:
+  1. bird_y >= gap_top_y        (bird top at or below gap top)
+  2. bird_y + 16 <= gap_top_y + 64  (bird bottom at or above gap bottom)
+
+Collision if EITHER:
+  - bird_y < gap_top_y          → hit top pipe
+  - bird_y > gap_top_y + 48     → hit bottom pipe (equivalent to bird_y+16 > gap_top_y+64)
+```
+
+This ensures the bird's entire 16px height must fit within the 64px gap.
 
 ## Scrolling
 
-**Decision:** Horizontal scrolling active only when bird is flying.
+**Decision:** Horizontal scrolling at 2 pixels/frame when bird is flying.
 
 **Variables:**
 | Variable | Address | Description |
@@ -404,13 +425,16 @@ When scroll_nt = 1 (viewing NT1):
 | scroll_x | $08 | X scroll position (0-255) |
 | scroll_nt | $09 | Nametable select (0 or 1) |
 
+**Speed:** 2 pixels/frame = 120 pixels/second (matches original Flappy Bird feel)
+
 **Logic:**
 - Bird on ground (Y = GROUND_Y): no scrolling
-- Bird flying: scroll 1 pixel/frame
-- When scroll_x wraps 255→0, toggle scroll_nt
+- Bird flying: scroll 2 pixels/frame
+- When scroll_x wraps past 255, toggle scroll_nt
 
 **Implementation:**
-- Scroll updated in main game loop
+- Scroll updated in main game loop using `adc #2`
+- Carry flag detects wrap (instead of `bne` with single increment)
 - PPU_SCROLL and PPU_CTRL set in NMI handler (after OAM DMA)
 - Both nametables pre-filled with ground tiles for seamless wrap
 

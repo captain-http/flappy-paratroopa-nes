@@ -415,9 +415,12 @@ game_loop:
     lda bird_y
     cmp #GROUND_Y
     beq @no_scroll        ; Bird on ground, don't scroll
-    ; Bird is flying, scroll by 1 pixel
-    inc scroll_x
-    bne @no_scroll        ; No overflow, done
+    ; Bird is flying, scroll by 2 pixels
+    lda scroll_x
+    clc
+    adc #2
+    sta scroll_x
+    bcc @no_scroll        ; No overflow, done
     ; scroll_x wrapped from 255 to 0, toggle nametable
     lda scroll_nt
     eor #$01              ; Toggle bit 0
@@ -660,27 +663,32 @@ check_pipe_collision:
 
 @check_y:
     ; A = gap row for the overlapping pipe
+    ; Rectangle collision: bird (56,bird_y)-(72,bird_y+16) vs pipes
+    ; Top pipe: Y from 0 to gap_top_y
+    ; Bottom pipe: Y from gap_top_y+64 to ground
+    ;
+    ; Bird safe if: bird_y >= gap_top_y AND bird_y+16 <= gap_top_y+64
+
     ; Calculate gap_top_y = gap * 8
     asl a
     asl a
-    asl a                 ; A = gap * 8 = gap_top_y
-    sta pipe0_drawn_gap   ; Temp storage for gap_top_y
+    asl a                 ; A = gap_top_y
+    sta pipe0_drawn_gap
 
-    ; Check if bird_y < gap_top_y (hit top pipe)
-    cmp bird_y
-    beq @check_bottom     ; bird_y == gap_top_y, check bottom
-    bcc @check_bottom     ; bird_y > gap_top_y, check bottom
-    jmp @collision        ; bird_y < gap_top_y, hit top pipe
+    ; Check top pipe: bird_y < gap_top_y means bird top is in top pipe
+    lda bird_y
+    cmp pipe0_drawn_gap   ; compare bird_y with gap_top_y
+    bcc @collision        ; bird_y < gap_top_y, hit top pipe
 
-@check_bottom:
-    ; Calculate gap_bottom_y - 16 = gap_top_y + 64 - 16 = gap_top_y + 48
-    lda pipe0_drawn_gap   ; gap_top_y
+    ; Check bottom pipe: bird_y+16 > gap_top_y+64 means bird bottom is in bottom pipe
+    ; Equivalent: bird_y > gap_top_y+48
+    lda pipe0_drawn_gap
     clc
-    adc #(GAP_ROWS * 8 - 16)  ; A = gap_top_y + 48
-    cmp bird_y
-    beq @collision        ; bird_y == threshold, hit bottom
-    bcs @no_collision     ; bird_y < threshold, in gap (safe)
-                          ; bird_y > threshold, hit bottom (fall through)
+    adc #(GAP_ROWS * 8)   ; A = gap_top_y + 64 (gap bottom / bottom pipe top)
+    sec
+    sbc #16               ; A = gap_top_y + 48 (max safe bird_y)
+    cmp bird_y            ; compare threshold with bird_y
+    bcc @collision        ; threshold < bird_y, bird bottom in pipe
 
 @no_collision:
     rts
