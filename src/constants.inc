@@ -23,6 +23,14 @@ game_state  = $0A       ; 0 = waiting, 1 = playing, 2 = dying, 3 = dead
 pipe_redraw = $0B       ; Nametable to redraw pipes in (0, 1, or $FF=none)
 nt_base     = $0C       ; Nametable base high byte ($20=NT0, $24=NT1)
 pipe_col    = $0D       ; Current pipe column (0 or 16)
+pipe_gap    = $0E       ; Gap start row (for drawing)
+pipe0_drawn_gap = $0F   ; Gap of pipe 0 when it was drawn (for collision)
+
+; Pipe layout constants
+DEFAULT_GAP = 12        ; Default gap row
+GAP_ROWS    = 8         ; Gap size in rows (64 pixels)
+GAP_MIN     = 4         ; Minimum gap row
+GAP_MAX     = 15        ; Maximum gap row
 
 ; Game state constants
 STATE_WAITING = 0       ; Waiting for player to press A/B

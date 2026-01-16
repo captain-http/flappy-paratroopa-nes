@@ -140,56 +140,70 @@ Spacing: 384 - 256 = 128 pixels
 
 ## Pipe Redraw on Scroll Loop
 
-**Decision:** Redraw pipes dynamically when the off-screen nametable needs to be prepared, split across two frames to fit within vblank.
+**Decision:** Redraw pipes dynamically when the off-screen nametable needs to be prepared, split across eight frames to fit within vblank.
 
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
-| pipe_redraw | $0B | Redraw state: 0=pipe 0, 1=pipe 1, $FF=none |
+| pipe_redraw | $0B | Redraw state: 0-7=active frame, $FF=none |
 | nt_base | $0C | Nametable base ($20=NT0, $24=NT1) |
 | pipe_col | $0D | Current pipe column (0 or 16) |
+| pipe_gap | $0E | Gap start row (cycles through GAP_MIN to GAP_MAX) |
+| pipe0_drawn_gap | $0F | Saved gap for collision detection |
 
 **Mechanism:**
 1. Initial state: NT0 empty, NT1 has both pipes
 2. When scroll_x wraps (255→0), toggle scroll_nt
-3. When switching TO NT1: NT0 just scrolled off-screen, set pipe_redraw=0
-4. When switching TO NT0: Do nothing (NT1 keeps its pipes from init)
+3. When switching TO NT1: NT0 just scrolled off-screen, queue NT0 redraw
+4. When switching TO NT0: NT1 just scrolled off-screen, queue NT1 redraw
 5. NMI handler checks pipe_redraw and calls draw_pipes_in_nt if needed
 
-**Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view.
+**Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view (~4.3 seconds at 1px/frame).
 
-**Two-Frame Redraw:**
+**Eight-Frame Redraw:**
 
-Drawing both pipes (~2560 cycles) exceeds the available vblank time (~1760 cycles after OAM DMA). Writing to VRAM outside vblank causes visual glitches. Solution: split across two frames.
+Drawing a full pipe column requires ~2400 cycles (26 rows × ~92 cycles/row), which exceeds vblank. The gap position also varies, making top-half row count variable (4-23 rows). Solution: split each pipe into 4 parts across 8 total frames.
 
 ```
-Frame N:   pipe_redraw=0 → draw pipe 0 + attrs → set pipe_redraw=1
-Frame N+1: pipe_redraw=1 → draw pipe 1 + attrs → set pipe_redraw=$FF
+Frame 0: pipe 0 body+cap   → set pipe_redraw=1
+Frame 1: pipe 0 gap clear  → set pipe_redraw=2
+Frame 2: pipe 0 bottom     → set pipe_redraw=3
+Frame 3: pipe 0 attrs      → set pipe_redraw=4, next_pipe_gap
+Frame 4: pipe 1 body+cap   → set pipe_redraw=5
+Frame 5: pipe 1 gap clear  → set pipe_redraw=6
+Frame 6: pipe 1 bottom     → set pipe_redraw=7
+Frame 7: pipe 1 attrs      → set pipe_redraw=$FF, next_pipe_gap
 ```
 
-| Frame | What | Cycles |
-|-------|------|--------|
-| 1 | Pipe 0 + attributes | ~1280 |
-| 2 | Pipe 1 + attributes | ~1280 |
+| Frame | What | Max Rows | Max Cycles |
+|-------|------|----------|------------|
+| 0, 4 | Body + cap | 15 | ~1275 |
+| 1, 5 | Gap clear | 8 | ~680 |
+| 2, 6 | Bottom (cap + body) | 14 | ~1190 |
+| 3, 7 | Attributes | 7 bytes | ~170 |
 
-Each frame fits within the ~1760 cycle budget. The 1-frame delay (1/60th second) between pipes is invisible to the player.
+All frames fit comfortably within the ~1700 cycle budget (after OAM DMA + overhead).
+
+**Gap Clearing:**
+
+When redrawing pipes with different gap positions, old tiles from the previous pipe remain visible. The gap area (8 rows) is explicitly cleared with empty tiles ($00) to prevent visual artifacts.
 
 **Timing:**
 ```
-NT0 (empty) visible → scroll → switch to NT1 → pipe_redraw=0
-NT1 visible, NMI draws pipe 0 in NT0 → pipe_redraw=1
-NT1 visible, NMI draws pipe 1 in NT0 → pipe_redraw=$FF
-... scroll continues ...
-NT0 (now has pipes) visible → scroll → switch to NT1 → pipe_redraw=0
-... continues seamlessly
+NT0 visible → scroll 256px → switch to NT1 → queue NT0 redraw
+  NMI frames 0-7: redraw both pipes in NT0
+NT1 visible → scroll 256px → switch to NT0 → queue NT1 redraw
+  NMI frames 0-7: redraw both pipes in NT1
+... continues seamlessly, alternating nametables
 ```
 
 **Cycle Budget:**
 ```
-VBlank total:     ~2273 cycles
-OAM DMA:          - 513 cycles
-Available:        ~1760 cycles
-Per-pipe redraw:  ~1280 cycles  ✓ fits
+VBlank total:       ~2273 cycles
+OAM DMA:            - 513 cycles
+NMI overhead:       - 60 cycles
+Available:          ~1700 cycles
+Worst frame (body): ~1275 cycles  ✓ fits with margin
 ```
 
 ## Bird Sprite: 16x16 (4 tiles)
@@ -341,8 +355,12 @@ nmi:
 
 **NMI responsibilities (in order):**
 1. OAM DMA transfer (~513 cycles)
-2. Set PPU_SCROLL (X and Y)
-3. Set PPU_CTRL with nametable select
-4. Signal main loop via `nmi_flag`
+2. Pipe redraw if queued (0-1275 cycles depending on frame)
+3. Set PPU_SCROLL (X and Y)
+4. Set PPU_CTRL with nametable select
+5. Signal main loop via `nmi_flag`
 
-**Cycle budget:** ~560 cycles total (well under ~2273 VBlank budget)
+**Cycle budget:** Variable based on pipe redraw state:
+- No redraw: ~560 cycles
+- Worst case (body+cap frame): ~1850 cycles
+- All within ~2273 VBlank budget

@@ -118,9 +118,10 @@ reset:
     sta bird_vel_lo
     sta bird_vel_hi
 
-    ; Initialize pipe redraw state
-    lda #$FF
-    sta pipe_redraw       ; $FF = no redraw needed
+    ; Initialize pipe gap (start of cycle)
+    lda #GAP_MIN
+    sta pipe_gap
+    sta pipe0_drawn_gap   ; Initial collision gap
 
     ; Initialize sprite Y positions from bird_y
     lda bird_y
@@ -270,9 +271,19 @@ reset:
     bne @attr1_ground
 
     ; Draw pipes in NT1 (initial screen is empty NT0)
+    ; Use eight-frame drawing routine (outside vblank, no constraint)
     lda #$24              ; NT1 base
     sta nt_base
-    jsr draw_both_pipes
+    lda #0
+    sta pipe_redraw       ; Start with pipe 0 body+cap
+    jsr draw_pipes_in_nt  ; Frame 1: pipe 0 body+cap
+    jsr draw_pipes_in_nt  ; Frame 2: pipe 0 gap
+    jsr draw_pipes_in_nt  ; Frame 3: pipe 0 bottom
+    jsr draw_pipes_in_nt  ; Frame 4: pipe 0 attrs
+    jsr draw_pipes_in_nt  ; Frame 5: pipe 1 body+cap
+    jsr draw_pipes_in_nt  ; Frame 6: pipe 1 gap
+    jsr draw_pipes_in_nt  ; Frame 7: pipe 1 bottom
+    jsr draw_pipes_in_nt  ; Frame 8: pipe 1 attrs
 
     ; Reset scroll position
     bit PPU_STATUS
@@ -403,12 +414,20 @@ game_loop:
     lda scroll_nt
     eor #$01              ; Toggle bit 0
     sta scroll_nt
-    ; Check if we need to queue pipe redraw
-    ; When switching TO NT1, NT0 just went off-screen - queue it for redraw
-    beq @no_scroll
-    ; Switched to NT1 - NT0 just went off-screen, queue redraw
+    ; Queue pipe redraw for the nametable that just went off-screen
+    ; scroll_nt = 1: switched TO NT1, queue NT0 redraw
+    ; scroll_nt = 0: switched TO NT0, queue NT1 redraw
+    beq @queue_nt1
+    ; Switched to NT1 - queue NT0 redraw
+    lda #$20
+    jmp @queue_redraw
+@queue_nt1:
+    ; Switched to NT0 - queue NT1 redraw
+    lda #$24
+@queue_redraw:
+    sta nt_base
     lda #0
-    sta pipe_redraw       ; Queue NT0 for pipe redraw
+    sta pipe_redraw
 @no_scroll:
     jmp game_loop
 
@@ -602,19 +621,34 @@ check_pipe_collision:
 
     ; X overlaps! Now check Y
     ; Bird must be OUTSIDE the gap to collide
-    ; Gap is Y = 96 to 160 (rows 12-19)
-    ; Bird is 16px tall, so check bird_y and bird_y+16
+    ; Gap top Y = pipe0_drawn_gap * 8
+    ; Gap bottom Y = (pipe0_drawn_gap + 8) * 8
+    ; Bird is 16px tall
 
-    ; Collision if: bird_y < GAP_TOP (96) OR bird_y + 16 > GAP_BOTTOM (160)
-    ; Which means: bird_y < 96 OR bird_y > 144
+    ; Calculate gap_top_y = pipe0_drawn_gap * 8
+    lda pipe0_drawn_gap
+    asl a
+    asl a
+    asl a                 ; A = gap * 8 = gap_top_y
 
-    lda bird_y
-    cmp #GAP_TOP
-    bcc @collision        ; bird_y < 96, hit top pipe
+    ; Check if bird_y < gap_top_y (hit top pipe)
+    cmp bird_y
+    beq @check_bottom     ; bird_y == gap_top_y, check bottom
+    bcc @check_bottom     ; bird_y > gap_top_y, check bottom
+    jmp @collision        ; bird_y < gap_top_y, hit top pipe
 
-    ; Check bottom: bird_y + 16 > GAP_BOTTOM means bird_y > GAP_BOTTOM - 16
-    cmp #(GAP_BOTTOM - 16)
-    bcs @collision        ; bird_y >= 144, hit bottom pipe
+@check_bottom:
+    ; Calculate gap_bottom_y - 16 = gap * 8 + 64 - 16 = gap * 8 + 48
+    lda pipe0_drawn_gap
+    asl a
+    asl a
+    asl a                 ; A = gap * 8
+    clc
+    adc #(GAP_ROWS * 8 - 16)  ; A = gap_top_y + 48
+    cmp bird_y
+    beq @collision        ; bird_y == threshold, hit bottom
+    bcs @no_collision     ; bird_y < threshold, in gap (safe)
+                          ; bird_y > threshold, hit bottom (fall through)
 
 @no_collision:
     rts
@@ -629,36 +663,111 @@ check_pipe_collision:
 ; Pipe Drawing (called from NMI during vblank)
 ;===============================================================================
 draw_pipes_in_nt:
-    ; Two-frame pipe redraw to fit in vblank
-    ; pipe_redraw = 0: draw pipe 0, then set to 1
-    ; pipe_redraw = 1: draw pipe 1, then set to $FF (done)
+    ; Eight-frame pipe redraw to fit in vblank
+    ; pipe_redraw = 0: draw pipe 0 body+cap, set to 1
+    ; pipe_redraw = 1: draw pipe 0 gap clear, set to 2
+    ; pipe_redraw = 2: draw pipe 0 bottom, set to 3
+    ; pipe_redraw = 3: draw pipe 0 attrs, set to 4
+    ; pipe_redraw = 4: draw pipe 1 body+cap, set to 5
+    ; pipe_redraw = 5: draw pipe 1 gap clear, set to 6
+    ; pipe_redraw = 6: draw pipe 1 bottom, set to 7
+    ; pipe_redraw = 7: draw pipe 1 attrs, set to $FF (done)
     ; pipe_redraw = $FF: skip (checked by NMI before calling)
-
-    lda #$20              ; NT0 base (only NT0 redraws for now)
-    sta nt_base
+    ; Caller must set nt_base before queuing redraw
 
     bit PPU_STATUS        ; Reset PPU latch
 
     lda pipe_redraw
-    bne @draw_pipe1
+    beq @frame0
+    cmp #1
+    beq @frame1
+    cmp #2
+    beq @frame2
+    cmp #3
+    beq @frame3
+    cmp #4
+    beq @frame4
+    cmp #5
+    beq @frame5
+    cmp #6
+    beq @frame6
+    ; Fall through to frame 7
 
-    ; Frame 1: Draw pipe 0
-    lda #0
-    sta pipe_col
-    jsr draw_pipe
-    jsr draw_pipe0_attrs_only
-    lda #1
-    sta pipe_redraw       ; Next frame: draw pipe 1
-    rts
-
-@draw_pipe1:
-    ; Frame 2: Draw pipe 1
-    lda #16
-    sta pipe_col
-    jsr draw_pipe
+@frame7:
+    ; Frame 8: Draw pipe 1 attrs
     jsr draw_pipe1_attrs_only
+    jsr next_pipe_gap     ; Increment gap for next pipe
     lda #$FF
     sta pipe_redraw       ; Done
+    rts
+
+@frame0:
+    ; Frame 1: Draw pipe 0 body+cap
+    lda #0
+    sta pipe_col
+    lda pipe_gap
+    sta pipe0_drawn_gap   ; Save gap for collision detection
+    jsr draw_pipe_body_cap
+    lda #1
+    sta pipe_redraw
+    rts
+
+@frame1:
+    ; Frame 2: Draw pipe 0 gap clear
+    jsr draw_pipe_gap
+    lda #2
+    sta pipe_redraw
+    rts
+
+@frame2:
+    ; Frame 3: Draw pipe 0 bottom
+    jsr draw_pipe_bottom
+    lda #3
+    sta pipe_redraw
+    rts
+
+@frame3:
+    ; Frame 4: Draw pipe 0 attrs
+    jsr draw_pipe0_attrs_only
+    jsr next_pipe_gap     ; Increment gap for next pipe
+    lda #4
+    sta pipe_redraw
+    rts
+
+@frame4:
+    ; Frame 5: Draw pipe 1 body+cap
+    lda #16
+    sta pipe_col
+    jsr draw_pipe_body_cap
+    lda #5
+    sta pipe_redraw
+    rts
+
+@frame5:
+    ; Frame 6: Draw pipe 1 gap clear
+    jsr draw_pipe_gap
+    lda #6
+    sta pipe_redraw
+    rts
+
+@frame6:
+    ; Frame 7: Draw pipe 1 bottom
+    jsr draw_pipe_bottom
+    lda #7
+    sta pipe_redraw
+    rts
+
+;---------------------------------------
+; Increment pipe_gap, wrap at max
+;---------------------------------------
+next_pipe_gap:
+    inc pipe_gap
+    lda pipe_gap
+    cmp #(GAP_MAX + 1)
+    bcc @done
+    lda #GAP_MIN          ; Wrap to min
+    sta pipe_gap
+@done:
     rts
 
 ;===============================================================================
@@ -667,54 +776,14 @@ draw_pipes_in_nt:
 ;===============================================================================
 
 ;---------------------------------------
-; Draw both pipes in the nametable specified by nt_base
-; Used during init (outside vblank, no time constraint)
+; Draw pipe body + cap (top pipe only)
+; Uses pipe_gap to determine layout
 ;---------------------------------------
-draw_both_pipes:
-    ; Reset PPU address latch before drawing
-    bit PPU_STATUS
-
-    ; Draw pipe 0 at column 0
-    lda #0
-    sta pipe_col
-    jsr draw_pipe
-
-    ; Draw pipe 1 at column 16
-    lda #16
-    sta pipe_col
-    jsr draw_pipe
-
-    ; Draw attributes for both pipes
-    jsr draw_all_pipe_attrs
-    rts
-
-;---------------------------------------
-; Draw a single pipe at nt_base + pipe_col
-; Top body rows 0-9, cap rows 10-11
-; Gap rows 12-19 (not drawn, sky shows through)
-; Bottom cap rows 20-21, body rows 22-25
-;---------------------------------------
-draw_pipe:
-    ; Top pipe body (rows 0-9)
+draw_pipe_body_cap:
+    ; Top pipe body (rows 0 to pipe_gap-3)
     ldx #0
 @top_body:
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc nt_base           ; A = nt_base + (row / 8)
-    sta PPU_ADDR
-    txa
-    and #$07
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    clc
-    adc pipe_col          ; + column
-    sta PPU_ADDR
+    jsr set_row_ppu_addr
     lda #$19
     sta PPU_DATA
     lda #$1A
@@ -724,18 +793,17 @@ draw_pipe:
     lda #$1C
     sta PPU_DATA
     inx
-    cpx #10
-    bne @top_body
+    txa
+    clc
+    adc #2                ; A = X + 2
+    cmp pipe_gap          ; compare (X + 2) to pipe_gap
+    bcc @top_body         ; continue if X + 2 < pipe_gap (i.e. X < pipe_gap - 2)
 
-    ; Top pipe cap row 10 (under lip)
-    lda nt_base
-    clc
-    adc #1                ; row 10 is in page +1
-    sta PPU_ADDR
-    lda #$40              ; row 10: (10 & 7) * 32 = 2 * 32 = 64 = $40
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    ; Top pipe cap row 1 (under lip) - row = pipe_gap - 2
+    ldx pipe_gap
+    dex
+    dex                   ; X = pipe_gap - 2
+    jsr set_row_ppu_addr
     lda #$15
     sta PPU_DATA
     lda #$16
@@ -745,15 +813,10 @@ draw_pipe:
     lda #$18
     sta PPU_DATA
 
-    ; Top pipe cap row 11 (lip edge)
-    lda nt_base
-    clc
-    adc #1                ; row 11 is in page +1
-    sta PPU_ADDR
-    lda #$60              ; row 11: (11 & 7) * 32 = 3 * 32 = 96 = $60
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    ; Top pipe cap row 2 (lip edge) - row = pipe_gap - 1
+    ldx pipe_gap
+    dex                   ; X = pipe_gap - 1
+    jsr set_row_ppu_addr
     lda #$11
     sta PPU_DATA
     lda #$12
@@ -762,16 +825,41 @@ draw_pipe:
     sta PPU_DATA
     lda #$14
     sta PPU_DATA
+    rts
 
-    ; Bottom pipe cap row 20
-    lda nt_base
+;---------------------------------------
+; Draw pipe gap (clear with empty tiles)
+; Uses pipe_gap to determine layout
+;---------------------------------------
+draw_pipe_gap:
+    ; Gap area (rows pipe_gap to pipe_gap+7) - clear with empty tiles
+    ldx pipe_gap
+@clear_gap:
+    jsr set_row_ppu_addr
+    lda #$00              ; Empty/sky tile
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    inx
+    txa
+    sec
+    sbc pipe_gap          ; A = X - pipe_gap
+    cmp #GAP_ROWS
+    bcc @clear_gap        ; continue while X < pipe_gap + 8
+    rts
+
+;---------------------------------------
+; Draw pipe bottom half: cap + body
+; Uses pipe_gap to determine layout
+;---------------------------------------
+draw_pipe_bottom:
+    ; Bottom pipe cap row 1 - row = pipe_gap + 8
+    lda pipe_gap
     clc
-    adc #2                ; row 20 is in page +2
-    sta PPU_ADDR
-    lda #$80              ; row 20: (20 & 7) * 32 = 4 * 32 = 128 = $80
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    adc #GAP_ROWS         ; A = pipe_gap + 8
+    tax
+    jsr set_row_ppu_addr
     lda #$05
     sta PPU_DATA
     lda #$06
@@ -781,15 +869,12 @@ draw_pipe:
     lda #$08
     sta PPU_DATA
 
-    ; Bottom pipe cap row 21
-    lda nt_base
+    ; Bottom pipe cap row 2 - row = pipe_gap + 9
+    lda pipe_gap
     clc
-    adc #2                ; row 21 is in page +2
-    sta PPU_ADDR
-    lda #$A0              ; row 21: (21 & 7) * 32 = 5 * 32 = 160 = $A0
-    clc
-    adc pipe_col
-    sta PPU_ADDR
+    adc #(GAP_ROWS + 1)   ; A = pipe_gap + 9
+    tax
+    jsr set_row_ppu_addr
     lda #$09
     sta PPU_DATA
     lda #$0A
@@ -799,26 +884,13 @@ draw_pipe:
     lda #$0C
     sta PPU_DATA
 
-    ; Bottom pipe body (rows 22-25)
-    ldx #22
+    ; Bottom pipe body (rows pipe_gap+10 to 25)
+    lda pipe_gap
+    clc
+    adc #(GAP_ROWS + 2)   ; A = pipe_gap + 10
+    tax
 @bot_body:
-    txa
-    lsr a
-    lsr a
-    lsr a                 ; A = row / 8
-    clc
-    adc nt_base           ; A = nt_base + (row / 8)
-    sta PPU_ADDR
-    txa
-    and #$07
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; A = (row & 7) * 32
-    clc
-    adc pipe_col          ; + column
-    sta PPU_ADDR
+    jsr set_row_ppu_addr
     lda #$0D
     sta PPU_DATA
     lda #$0E
@@ -829,12 +901,38 @@ draw_pipe:
     sta PPU_DATA
     inx
     cpx #26
-    bne @bot_body
+    bcc @bot_body         ; continue while X < 26
 
     rts
 
 ;---------------------------------------
-; DEBUG: Draw attributes for pipe 0 only (faster)
+; Helper: Set PPU address for row X at pipe_col
+; X = row number (0-29)
+; Preserves X
+;---------------------------------------
+set_row_ppu_addr:
+    txa
+    lsr a
+    lsr a
+    lsr a                 ; A = row / 8
+    clc
+    adc nt_base           ; A = nt_base + (row / 8)
+    sta PPU_ADDR
+    txa
+    and #$07
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = (row & 7) * 32
+    clc
+    adc pipe_col          ; + column
+    sta PPU_ADDR
+    rts
+
+;---------------------------------------
+; Draw attributes for pipe 0 only (column 0)
+; Sets all rows 0-5 to pipe palette, row 6 to pipe/ground
 ;---------------------------------------
 draw_pipe0_attrs_only:
     lda nt_base
@@ -842,37 +940,53 @@ draw_pipe0_attrs_only:
     adc #3
     sta nt_base           ; attr base
 
+    ; Attr rows 0-5: pipe palette ($AA)
     lda nt_base
     sta PPU_ADDR
-    lda #$C0
+    lda #$C0              ; Row 0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$C8
+    lda #$C8              ; Row 1
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$D0
+    lda #$D0              ; Row 2
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$E8
+    lda #$D8              ; Row 3
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$F0
+    lda #$E0              ; Row 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+
+    lda nt_base
+    sta PPU_ADDR
+    lda #$E8              ; Row 5
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+
+    ; Attr row 6: pipe/ground ($5A)
+    lda nt_base
+    sta PPU_ADDR
+    lda #$F0              ; Row 6
     sta PPU_ADDR
     lda #$5A
     sta PPU_DATA
@@ -886,6 +1000,7 @@ draw_pipe0_attrs_only:
 
 ;---------------------------------------
 ; Draw attributes for pipe 1 only (column 4)
+; Sets all rows 0-5 to pipe palette, row 6 to pipe/ground
 ;---------------------------------------
 draw_pipe1_attrs_only:
     lda nt_base
@@ -893,37 +1008,53 @@ draw_pipe1_attrs_only:
     adc #3
     sta nt_base           ; attr base
 
+    ; Attr rows 0-5: pipe palette ($AA)
     lda nt_base
     sta PPU_ADDR
-    lda #$C4
+    lda #$C4              ; Row 0
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$CC
+    lda #$CC              ; Row 1
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$D4
+    lda #$D4              ; Row 2
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$EC
+    lda #$DC              ; Row 3
     sta PPU_ADDR
     lda #$AA
     sta PPU_DATA
 
     lda nt_base
     sta PPU_ADDR
-    lda #$F4
+    lda #$E4              ; Row 4
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+
+    lda nt_base
+    sta PPU_ADDR
+    lda #$EC              ; Row 5
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+
+    ; Attr row 6: pipe/ground ($5A)
+    lda nt_base
+    sta PPU_ADDR
+    lda #$F4              ; Row 6
     sta PPU_ADDR
     lda #$5A
     sta PPU_DATA
@@ -933,100 +1064,6 @@ draw_pipe1_attrs_only:
     sec
     sbc #3
     sta nt_base
-    rts
-
-;---------------------------------------
-; Draw attributes for both pipes
-; Pipe 0 at attr column 0, Pipe 1 at attr column 4
-; Attr base = nt_base + 3, offset $C0
-;---------------------------------------
-draw_all_pipe_attrs:
-    ; Calculate attribute base high byte
-    lda nt_base
-    clc
-    adc #3
-    sta nt_base           ; Temporarily use nt_base as attr base (will restore)
-
-    ; --- Pipe 0 attributes (column 0) ---
-    ; Attr row 0
-    lda nt_base
-    sta PPU_ADDR
-    lda #$C0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 1
-    lda nt_base
-    sta PPU_ADDR
-    lda #$C8
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 2
-    lda nt_base
-    sta PPU_ADDR
-    lda #$D0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 5
-    lda nt_base
-    sta PPU_ADDR
-    lda #$E8
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 6 (pipe/ground)
-    lda nt_base
-    sta PPU_ADDR
-    lda #$F0
-    sta PPU_ADDR
-    lda #$5A
-    sta PPU_DATA
-
-    ; --- Pipe 1 attributes (column 4) ---
-    ; Attr row 0
-    lda nt_base
-    sta PPU_ADDR
-    lda #$C4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 1
-    lda nt_base
-    sta PPU_ADDR
-    lda #$CC
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 2
-    lda nt_base
-    sta PPU_ADDR
-    lda #$D4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 5
-    lda nt_base
-    sta PPU_ADDR
-    lda #$EC
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-    ; Attr row 6 (pipe/ground)
-    lda nt_base
-    sta PPU_ADDR
-    lda #$F4
-    sta PPU_ADDR
-    lda #$5A
-    sta PPU_DATA
-
-    ; Restore nt_base (subtract 3)
-    lda nt_base
-    sec
-    sbc #3
-    sta nt_base
-
     rts
 
 ;===============================================================================
