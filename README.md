@@ -39,15 +39,15 @@ Output: `build/flappy.nes`
 - [x] Multiple pipes — 2 pipes spaced 128px apart, both scrolling
 
 ### Phase 4: Game Loop
-- [ ] Add score counter — increment when passing pipe
-- [ ] Display score on screen — numbers via sprites or background
-- [ ] Game over state — freeze, show score, wait for restart
+- [x] Add score counter — increment when passing pipe (max 999)
+- [x] Display score on screen — 3-digit sprite display centered at top
+- [x] Game over state — dying state (falls), dead state (frozen)
 - [ ] Title screen — press Start to begin
 
 ### Phase 5: Polish
-- [ ] Replace squares with real pixel art tiles
-- [ ] Add animation frames — bird flapping, rotation on fall
-- [ ] Add sound effects — flap, score, death
+- [x] Replace squares with real pixel art tiles — Koopa Paratroopa (2x3 sprites)
+- [x] Add animation frames — wing flapping every 8 frames
+- [x] Add sound effects — flap, score (coin), crash, ground hit
 - [ ] Add music (optional)
 
 ## Dev Reference

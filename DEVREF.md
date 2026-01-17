@@ -213,25 +213,35 @@ Available:          ~1700 cycles
 Worst frame (body): ~1275 cycles  ✓ fits with margin
 ```
 
-## Bird Sprite: 16x16 (4 tiles)
+## Bird Sprite: 16x24 (6 tiles) — Koopa Paratroopa
 
-**Decision:** Use 4 tiles arranged 2x2 for the bird.
+**Decision:** Use 6 tiles arranged 2x3 for the bird (Koopa Paratroopa from SMB).
 
 ```
 ┌───┬───┐
-│ 1 │ 1 │  Currently: all use tile $01 (placeholder)
-├───┼───┤  Future: tiles $01-$04 for proper bird graphic
-│ 1 │ 1 │  4 OAM entries needed
+│$01│$02│  Top row (head/wings)
+├───┼───┤
+│$03│$04│  Middle row (shell)
+├───┼───┤
+│$05│$06│  Bottom row (feet)
 └───┴───┘
 ```
 
-**Sprite tile:** `$01` from pattern table 0 (sprite bank)
+**Animation frames:**
+- Frame 1: tiles $01-$06 (wings up)
+- Frame 2: tiles $07-$0C (wings down)
+- Toggles every 8 frames during `STATE_PLAYING`
+
+**Sprite palette 0:** `$22, $1A, $30, $27`
+- $22: Light blue (transparent)
+- $1A: Green (shell)
+- $30: White (belly/face)
+- $27: Orange (feet/details)
 
 **X position:** 56-72 (centered at 1/4 screen width)
 - NES screen width: 256 pixels
 - Bird center: 64 pixels (256 ÷ 4)
 - Left tiles: X=56, Right tiles: X=64
-- Matches original Flappy Bird positioning
 
 ## Physics: 8.8 Fixed-Point
 
@@ -255,7 +265,7 @@ Low byte  = fraction (256ths of a pixel)
 ```
 GRAVITY   = $40   ; ~0.25 pixels/frame² (floaty feel)
 CEILING_Y = 8     ; Top boundary
-GROUND_Y  = 192   ; Bottom boundary (bird sits on ground at row 26)
+GROUND_Y  = 184   ; Bottom boundary (2x3 sprite sits on ground at row 26)
 ```
 
 **Why 8.8:**
@@ -475,3 +485,66 @@ nmi:
 - No redraw: ~560 cycles
 - Worst case (body+cap frame): ~1850 cycles
 - All within ~2273 VBlank budget
+
+## Scoring System
+
+**Decision:** BCD score storage with sprite-based display, max 999.
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| score_ones | $19 | Ones digit (0-9) |
+| score_tens | $1A | Tens digit (0-9) |
+| score_hundreds | $1B | Hundreds digit (0-9) |
+| pipes_scored | $1C | Bitmask preventing double-scoring |
+
+**Score detection:**
+- Score increments when pipe's right edge passes bird's left edge
+- Uses `pipes_scored` bitmask (bits 0-3 for NT0P0, NT0P1, NT1P0, NT1P1)
+- Bitmask resets when pipe scrolls off-screen and is redrawn
+
+**Display (sprites):**
+```
+OAM+24: Hundreds digit at X=112, Y=16
+OAM+28: Tens digit at X=120, Y=16
+OAM+32: Ones digit at X=128, Y=16
+```
+
+**Digit tiles:** $10='0', $11='1', ... $19='9' (pattern table 0)
+
+## Sound System
+
+**Decision:** Use APU pulse and noise channels for sound effects.
+
+**Channels used:**
+- Pulse 1 ($4000-$4003): Flap sound, crash whistle
+- Pulse 2 ($4004-$4007): Score/coin sound
+- Noise ($400C-$400F): Crash and ground hit
+
+**Sound effects:**
+| Sound | Trigger | Implementation |
+|-------|---------|----------------|
+| Flap | A/B button while playing | Rising sweep on Pulse 1 (~250Hz start) |
+| Score | Pass a pipe | Two-note coin (B5→E6) on Pulse 2 |
+| Crash | Hit a pipe | Noise burst + falling whistle (Pulse 1 descending sweep) |
+| Ground hit | Hit floor directly | Noise burst only |
+
+**State machine (for coin sound):**
+| State | Description |
+|-------|-------------|
+| 0 | Idle |
+| 1 | Playing B5 (7 frames) |
+| 2 | Playing E6 (14 frames) |
+
+**Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| sound_timer | $1D | Frames until next sound state |
+| sound_state | $1E | Current sound state |
+
+**Frequency calculations:**
+```
+Timer = CPU_FREQ / (16 × freq) - 1
+B5 (988 Hz) → timer $70
+E6 (1318 Hz) → timer $54
+```
