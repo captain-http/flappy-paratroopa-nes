@@ -99,14 +99,18 @@ reset:
     lda #$0F              ; Color 3 - black
     sta PPU_DATA
 
-    ; Skip to sprite palette 0 ($3F10)
+    ; Sprite palette 0 ($3F10) - Koopa Paratroopa colors
     lda #$3F
     sta PPU_ADDR
     lda #$10
     sta PPU_ADDR
-    lda #$21              ; Transparent (uses bg color)
+    lda #$22              ; Color 0 - light blue (sky)
     sta PPU_DATA
-    lda #$27              ; Yellow (bird color)
+    lda #$1A              ; Color 1 - green (shell)
+    sta PPU_DATA
+    lda #$30              ; Color 2 - white (belly/face)
+    sta PPU_DATA
+    lda #$27              ; Color 3 - orange (feet/details)
     sta PPU_DATA
 
     ; Initialize bird state (8.8 fixed-point)
@@ -131,37 +135,55 @@ reset:
     ; NT1 gaps will be set by draw_pipes_in_nt during init
     jsr next_pipe_gap     ; Set initial pipe_gap for NT1 pipe 0
 
-    ; Initialize sprite Y positions from bird_y
+    ; Initialize sprite Y positions from bird_y (2x3 bird = 6 sprites)
     lda bird_y
     sta OAM_BUFFER+0      ; Top-left Y
     sta OAM_BUFFER+4      ; Top-right Y
     clc
     adc #8
-    sta OAM_BUFFER+8      ; Bottom-left Y
-    sta OAM_BUFFER+12     ; Bottom-right Y
+    sta OAM_BUFFER+8      ; Mid-left Y
+    sta OAM_BUFFER+12     ; Mid-right Y
+    clc
+    adc #8
+    sta OAM_BUFFER+16     ; Bottom-left Y
+    sta OAM_BUFFER+20     ; Bottom-right Y
 
-    ; Setup sprite tiles and attributes (static parts)
-    lda #$01              ; Tile 1 (bird)
-    sta OAM_BUFFER+1
-    sta OAM_BUFFER+5
-    sta OAM_BUFFER+9
-    sta OAM_BUFFER+13
-    lda #$00              ; Attributes (palette 0)
+    ; Setup sprite tiles (2x3 pattern: $01-$06)
+    lda #$01
+    sta OAM_BUFFER+1      ; Top-left tile
+    lda #$02
+    sta OAM_BUFFER+5      ; Top-right tile
+    lda #$03
+    sta OAM_BUFFER+9      ; Mid-left tile
+    lda #$04
+    sta OAM_BUFFER+13     ; Mid-right tile
+    lda #$05
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    lda #$06
+    sta OAM_BUFFER+21     ; Bottom-right tile
+
+    ; Attributes (palette 0 for all)
+    lda #$00
     sta OAM_BUFFER+2
     sta OAM_BUFFER+6
     sta OAM_BUFFER+10
     sta OAM_BUFFER+14
+    sta OAM_BUFFER+18
+    sta OAM_BUFFER+22
+
     ; X positions (fixed at 1/4 screen width)
-    lda #56
+    lda #56               ; Left column
     sta OAM_BUFFER+3
     sta OAM_BUFFER+11
-    lda #64
+    sta OAM_BUFFER+19
+    lda #64               ; Right column
     sta OAM_BUFFER+7
     sta OAM_BUFFER+15
+    sta OAM_BUFFER+23
 
     ; Hide remaining sprites
     lda #$FF
-    ldx #16
+    ldx #24
 @hide_sprites:
     sta OAM_BUFFER, x
     inx
@@ -402,14 +424,18 @@ game_loop:
     sta game_state
 @no_ground:
 
-    ; Update sprite Y positions
+    ; Update sprite Y positions (2x3 bird)
     lda bird_y
     sta OAM_BUFFER+0      ; Top-left
     sta OAM_BUFFER+4      ; Top-right
     clc
     adc #8
-    sta OAM_BUFFER+8      ; Bottom-left
-    sta OAM_BUFFER+12     ; Bottom-right
+    sta OAM_BUFFER+8      ; Mid-left
+    sta OAM_BUFFER+12     ; Mid-right
+    clc
+    adc #8
+    sta OAM_BUFFER+16     ; Bottom-left
+    sta OAM_BUFFER+20     ; Bottom-right
 
     ; Scroll if bird is flying (not on ground)
     lda bird_y
@@ -479,6 +505,10 @@ game_loop:
     adc #8
     sta OAM_BUFFER+8
     sta OAM_BUFFER+12
+    clc
+    adc #8
+    sta OAM_BUFFER+16
+    sta OAM_BUFFER+20
 
     jmp game_loop
 
