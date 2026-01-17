@@ -17,6 +17,7 @@ make clean    # Clean build artifacts
 ```
 src/          # Assembly source and includes
 chr/          # CHR graphics data
+scripts/      # FCEUX Lua debug scripts
 nes.cfg       # Linker config (NROM-256)
 build/        # Output directory
 ```
@@ -48,6 +49,35 @@ Wing flapping animation runs during `STATE_PLAYING`:
 - `anim_timer` increments each frame
 - Every `ANIM_SPEED` (8) frames, `anim_frame` toggles between 0 and 6
 - Sprite tile indices = base tile ($01-$06) + `anim_frame` offset
+
+## Scoring System
+
+Score increments when the bird passes a pipe (pipe's right edge passes bird's left edge).
+
+### Score Display (Sprites)
+
+3 sprites display the score (max 999), centered at top of screen:
+
+| OAM Offset | Digit | X Position |
+|------------|-------|------------|
+| +24 | Hundreds | 112 |
+| +28 | Tens | 120 |
+| +32 | Ones | 128 |
+
+Digit tiles: `$10` = '0', `$11` = '1', ... `$19` = '9'
+
+### Score Variables (Zero Page)
+
+| Address | Variable | Purpose |
+|---------|----------|---------|
+| $19 | `score_ones` | Ones digit (0-9) |
+| $1A | `score_tens` | Tens digit (0-9) |
+| $1B | `score_hundreds` | Hundreds digit (0-9) |
+| $1C | `pipes_scored` | Bitmask preventing double-scoring |
+
+### Debug Script
+
+`scripts/score_display.lua` - FCEUX Lua script that overlays score and game state for debugging.
 
 ## Agents
 

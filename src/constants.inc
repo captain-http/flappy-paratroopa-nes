@@ -42,6 +42,19 @@ anim_timer    = $17     ; Animation frame counter
 anim_frame    = $18     ; Animation frame offset (0 or 6)
 ANIM_SPEED    = 8       ; Frames between animation updates
 
+; Score variables
+score_ones    = $19     ; Score ones digit (0-9)
+score_tens    = $1A     ; Score tens digit (0-9)
+score_hundreds = $1B    ; Score hundreds digit (0-9)
+pipes_scored  = $1C     ; Bitmask: bit 0=NT0P0, 1=NT0P1, 2=NT1P0, 3=NT1P1
+
+; Score display (sprites)
+DIGIT_TILE_BASE = $10   ; Tile $10 = '0', $11 = '1', ... $19 = '9'
+SCORE_Y         = 16    ; Y position of score digits
+SCORE_X_HUNDREDS = 112  ; X position of hundreds digit (centered)
+SCORE_X_TENS     = 120  ; X position of tens digit
+SCORE_X_ONES     = 128  ; X position of ones digit
+
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row
 GAP_ROWS    = 8         ; Gap size in rows (64 pixels)

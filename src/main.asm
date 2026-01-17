@@ -113,6 +113,21 @@ reset:
     lda #$27              ; Color 3 - orange (feet/details)
     sta PPU_DATA
 
+    ; Clear both nametables (VRAM persists on reset)
+    bit PPU_STATUS
+    lda #$20
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR          ; PPU address = $2000
+    tax                   ; X = 0, A = 0 (sky tile)
+    ldy #8                ; 8 pages = 2048 bytes (NT0 + NT1)
+@clear_nametables:
+    sta PPU_DATA
+    inx
+    bne @clear_nametables
+    dey
+    bne @clear_nametables
+
     ; Initialize bird state (8.8 fixed-point)
     lda #0
     sta bird_y_frac
@@ -181,9 +196,40 @@ reset:
     sta OAM_BUFFER+15
     sta OAM_BUFFER+23
 
+    ; Initialize score display sprites (3 digits)
+    ; Hundreds digit (OAM_BUFFER+24)
+    lda #SCORE_Y
+    sta OAM_BUFFER+24     ; Y
+    lda #DIGIT_TILE_BASE  ; Tile '0'
+    sta OAM_BUFFER+25
+    lda #$00              ; Attributes (palette 0)
+    sta OAM_BUFFER+26
+    lda #SCORE_X_HUNDREDS
+    sta OAM_BUFFER+27     ; X
+
+    ; Tens digit (OAM_BUFFER+28)
+    lda #SCORE_Y
+    sta OAM_BUFFER+28     ; Y
+    lda #DIGIT_TILE_BASE  ; Tile '0'
+    sta OAM_BUFFER+29
+    lda #$00              ; Attributes (palette 0)
+    sta OAM_BUFFER+30
+    lda #SCORE_X_TENS
+    sta OAM_BUFFER+31     ; X
+
+    ; Ones digit (OAM_BUFFER+32)
+    lda #SCORE_Y
+    sta OAM_BUFFER+32     ; Y
+    lda #DIGIT_TILE_BASE  ; Tile '0'
+    sta OAM_BUFFER+33
+    lda #$00              ; Attributes (palette 0)
+    sta OAM_BUFFER+34
+    lda #SCORE_X_ONES
+    sta OAM_BUFFER+35     ; X
+
     ; Hide remaining sprites
     lda #$FF
-    ldx #24
+    ldx #36
 @hide_sprites:
     sta OAM_BUFFER, x
     inx
@@ -340,6 +386,9 @@ game_loop:
     lda #0
     sta nmi_flag
 
+    ; Update score display sprites
+    jsr update_score_display
+
     ; Check game state
     lda game_state
     cmp #STATE_DEAD
@@ -371,6 +420,9 @@ game_loop:
 
     ; Check pipe collision
     jsr check_pipe_collision
+
+    ; Check for scoring (passing pipes)
+    jsr check_score
 
     ; Apply gravity to velocity (8.8 fixed-point)
     lda bird_vel_lo
@@ -485,12 +537,21 @@ game_loop:
     beq @queue_nt1
     ; Switched to NT1 - queue NT0 redraw
     lda #$20
+    sta nt_base
+    ; Clear NT0 scored flags (bits 0-1)
+    lda pipes_scored
+    and #%11111100
+    sta pipes_scored
     jmp @queue_redraw
 @queue_nt1:
     ; Switched to NT0 - queue NT1 redraw
     lda #$24
-@queue_redraw:
     sta nt_base
+    ; Clear NT1 scored flags (bits 2-3)
+    lda pipes_scored
+    and #%11110011
+    sta pipes_scored
+@queue_redraw:
     lda #0
     sta pipe_redraw
 @no_scroll:
@@ -755,6 +816,152 @@ check_pipe_collision:
     ; Bird hit pipe - start dying
     lda #STATE_DYING
     sta game_state
+    rts
+
+;===============================================================================
+; Score Checking
+;===============================================================================
+check_score:
+    ; Check if bird has passed any pipes (screen_x < 24 means fully passed)
+    ; Bird scores when pipe's right edge (screen_x + 32) passes bird's left (56)
+    ; That means screen_x < 24
+
+    lda scroll_nt
+    bne @check_nt1_scoring
+
+@check_nt0_scoring:
+    ; Viewing NT0 - check NT1 pipe 0 and NT0 pipe 1
+
+    ; NT0 pipe 1: screen_x = 128 - scroll_x
+    lda nt0_has_pipes
+    beq @check_nt1_pipe0_score  ; NT0 not drawn yet
+    lda #128
+    sec
+    sbc scroll_x
+    cmp #24
+    bcs @check_nt1_pipe0_score  ; screen_x >= 24, not passed yet
+    ; Pipe passed - check if already scored
+    lda pipes_scored
+    and #%00000010            ; Bit 1 = NT0 pipe 1
+    bne @check_nt1_pipe0_score ; Already scored
+    ; Score!
+    jsr increment_score
+    lda pipes_scored
+    ora #%00000010
+    sta pipes_scored
+
+@check_nt1_pipe0_score:
+    ; NT1 pipe 0: screen_x = 256 - scroll_x (wraps)
+    ; Only valid when scroll_x > 232 (pipe actually passed, not wrap-around)
+    lda scroll_x
+    cmp #233
+    bcc @score_done           ; scroll_x < 233, pipe not yet passed (avoid wrap issue)
+    lda #0
+    sec
+    sbc scroll_x
+    cmp #24
+    bcs @score_done           ; screen_x >= 24, not passed yet
+    ; Pipe passed - check if already scored
+    lda pipes_scored
+    and #%00000100            ; Bit 2 = NT1 pipe 0
+    bne @score_done           ; Already scored
+    ; Score!
+    jsr increment_score
+    lda pipes_scored
+    ora #%00000100
+    sta pipes_scored
+    jmp @score_done
+
+@check_nt1_scoring:
+    ; Viewing NT1 - check NT1 pipe 1 and NT0 pipe 0
+
+    ; NT1 pipe 1: screen_x = 128 - scroll_x
+    lda #128
+    sec
+    sbc scroll_x
+    cmp #24
+    bcs @check_nt0_pipe0_score ; screen_x >= 24, not passed yet
+    ; Pipe passed - check if already scored
+    lda pipes_scored
+    and #%00001000            ; Bit 3 = NT1 pipe 1
+    bne @check_nt0_pipe0_score ; Already scored
+    ; Score!
+    jsr increment_score
+    lda pipes_scored
+    ora #%00001000
+    sta pipes_scored
+
+@check_nt0_pipe0_score:
+    ; NT0 pipe 0: screen_x = 256 - scroll_x (wraps)
+    ; Only valid when scroll_x > 232 (pipe actually passed, not wrap-around)
+    lda nt0_has_pipes
+    beq @score_done           ; NT0 not drawn yet
+    lda scroll_x
+    cmp #233
+    bcc @score_done           ; scroll_x < 233, pipe not yet passed (avoid wrap issue)
+    lda #0
+    sec
+    sbc scroll_x
+    cmp #24
+    bcs @score_done           ; screen_x >= 24, not passed yet
+    ; Pipe passed - check if already scored
+    lda pipes_scored
+    and #%00000001            ; Bit 0 = NT0 pipe 0
+    bne @score_done           ; Already scored
+    ; Score!
+    jsr increment_score
+    lda pipes_scored
+    ora #%00000001
+    sta pipes_scored
+
+@score_done:
+    rts
+
+;===============================================================================
+; Increment Score (BCD style, max 999)
+;===============================================================================
+increment_score:
+    inc score_ones
+    lda score_ones
+    cmp #10
+    bcc @score_ok
+    lda #0
+    sta score_ones
+    inc score_tens
+    lda score_tens
+    cmp #10
+    bcc @score_ok
+    lda #0
+    sta score_tens
+    inc score_hundreds
+    lda score_hundreds
+    cmp #10
+    bcc @score_ok
+    ; Max score reached (999), clamp
+    lda #9
+    sta score_hundreds
+@score_ok:
+    rts
+
+;===============================================================================
+; Update Score Display Sprites
+;===============================================================================
+update_score_display:
+    ; Update sprite tiles based on score digits
+    lda score_hundreds
+    clc
+    adc #DIGIT_TILE_BASE
+    sta OAM_BUFFER+25     ; Hundreds digit tile
+
+    lda score_tens
+    clc
+    adc #DIGIT_TILE_BASE
+    sta OAM_BUFFER+29     ; Tens digit tile
+
+    lda score_ones
+    clc
+    adc #DIGIT_TILE_BASE
+    sta OAM_BUFFER+33     ; Ones digit tile
     rts
 
 ;===============================================================================
