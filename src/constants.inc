@@ -55,6 +55,10 @@ SCORE_X_HUNDREDS = 112  ; X position of hundreds digit (centered)
 SCORE_X_TENS     = 120  ; X position of tens digit
 SCORE_X_ONES     = 128  ; X position of ones digit
 
+; Sound variables
+sound_timer     = $1D   ; Frames until next sound state
+sound_state     = $1E   ; 0=idle, 1=coin B5, 2=coin E6
+
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row
 GAP_ROWS    = 8         ; Gap size in rows (64 pixels)

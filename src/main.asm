@@ -64,6 +64,10 @@ reset:
     bit PPU_STATUS
     bpl @vblank2
 
+    ; Enable APU channels (pulse 1 for flap/death, pulse 2 for score, noise for crash)
+    lda #%00001111        ; Enable pulse 1, 2, triangle, and noise
+    sta SND_CHN
+
     ; Load palettes
     bit PPU_STATUS        ; Reset PPU address latch
     lda #$3F
@@ -389,6 +393,9 @@ game_loop:
     ; Update score display sprites
     jsr update_score_display
 
+    ; Update sound effects
+    jsr update_sound
+
     ; Check game state
     lda game_state
     cmp #STATE_DEAD
@@ -416,6 +423,7 @@ game_loop:
     sta bird_vel_lo
     lda #FLAP_VEL_HI
     sta bird_vel_hi
+    jsr play_flap_sound
 @no_flap:
 
     ; Check pipe collision
@@ -474,6 +482,7 @@ game_loop:
     sta bird_y_frac
     lda #STATE_DEAD       ; Fully dead
     sta game_state
+    jsr play_ground_hit   ; Just noise burst (no whistle)
 @no_ground:
 
     ; Update sprite Y positions (2x3 bird)
@@ -816,6 +825,7 @@ check_pipe_collision:
     ; Bird hit pipe - start dying
     lda #STATE_DYING
     sta game_state
+    jsr play_crash_sound
     rts
 
 ;===============================================================================
@@ -941,6 +951,110 @@ increment_score:
     lda #9
     sta score_hundreds
 @score_ok:
+    ; Play score sound
+    jsr play_score_sound
+    rts
+
+;===============================================================================
+; Sound Effects
+;===============================================================================
+play_flap_sound:
+    ; Jump-style rising sweep on pulse 1
+    lda #%10011000        ; Duty 50%, length enabled, constant vol, vol=8
+    sta SQ1_VOL
+    ; Sweep: enabled, period=1, negative (pitch rises), shift=3
+    lda #%10011011        ; Enable, period=1, negative, shift=3
+    sta SQ1_SWEEP
+    ; Start frequency ~250Hz (timer ≈ $1BF)
+    lda #$BF
+    sta SQ1_LO
+    lda #%00101001        ; Length index 5, timer high = 1
+    sta SQ1_HI
+    rts
+
+play_crash_sound:
+    ; Hit sound - noise burst
+    lda #%00011000        ; Length halt, constant vol, vol=8
+    sta NOISE_VOL
+    lda #%00000100        ; Noise period 4 (mid-range crunch)
+    sta NOISE_LO
+    lda #%00000100        ; Short length
+    sta NOISE_HI
+    ; Falling whistle - descending tone on pulse 1
+    lda #%01010111        ; Duty 25% (thin whistle), length halt, constant vol, vol=7
+    sta SQ1_VOL
+    lda #%10010011        ; Sweep: enable, period=0 (fast), positive (descend), shift=3
+    sta SQ1_SWEEP
+    lda #$40              ; Start high frequency
+    sta SQ1_LO
+    lda #%11111000        ; Length halt, timer high = 0
+    sta SQ1_HI
+    rts
+
+play_ground_hit:
+    ; Noise burst only - for hitting ground without pipe collision
+    lda #%00011000        ; Length halt, constant vol, vol=8
+    sta NOISE_VOL
+    lda #%00000100        ; Noise period 4
+    sta NOISE_LO
+    lda #%00000100        ; Short length
+    sta NOISE_HI
+    rts
+
+play_score_sound:
+    ; Mario coin sound: B5 (short) then E6 (short) - fast staccato
+    ; Start with B5
+    lda #%10010110        ; Duty 50%, length enabled, constant vol, vol=6
+    sta SQ2_VOL
+    lda #$00
+    sta SQ2_SWEEP         ; Disable sweep completely
+    ; B5 = 987.77 Hz, timer = 1789773/(16*987.77)-1 = 112 = $70
+    lda #$70
+    sta SQ2_LO
+    lda #%00001000        ; Length index 1, timer high = 0
+    sta SQ2_HI
+    ; Switch to E6 in 7 frames (SMB timing)
+    lda #1
+    sta sound_state
+    lda #7
+    sta sound_timer
+    rts
+
+update_sound:
+    ; Called every frame to manage coin sound timing
+    lda sound_state
+    beq @sound_done       ; State 0 = idle, nothing to do
+
+    ; Decrement timer
+    dec sound_timer
+    bne @sound_done       ; Timer not expired yet
+
+    ; Timer expired - check state
+    lda sound_state
+    cmp #1
+    beq @switch_to_e6
+    cmp #2
+    beq @silence_sound
+    rts
+
+@switch_to_e6:
+    ; Switch to E6 (coin sound)
+    lda #$54              ; E6 = 1318 Hz
+    sta SQ2_LO
+    lda #%00001000
+    sta SQ2_HI
+    lda #2
+    sta sound_state
+    lda #14
+    sta sound_timer
+    rts
+
+@silence_sound:
+    lda #%00010000        ; Volume = 0
+    sta SQ2_VOL
+    lda #0
+    sta sound_state
+@sound_done:
     rts
 
 ;===============================================================================

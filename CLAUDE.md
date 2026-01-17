@@ -79,6 +79,30 @@ Digit tiles: `$10` = '0', `$11` = '1', ... `$19` = '9'
 
 `scripts/score_display.lua` - FCEUX Lua script that overlays score and game state for debugging.
 
+## Sound System
+
+Uses NES APU channels for sound effects:
+
+| Sound | Trigger | Channel | Description |
+|-------|---------|---------|-------------|
+| Flap | Press A/B while playing | Pulse 1 | Rising sweep (~250Hz start) |
+| Score | Pass a pipe | Pulse 2 | Mario-style coin (B5 → E6) |
+| Crash | Hit a pipe | Noise + Pulse 1 | Noise burst + falling whistle |
+| Ground hit | Hit floor directly | Noise | Noise burst only |
+
+### Sound Variables (Zero Page)
+
+| Address | Variable | Purpose |
+|---------|----------|---------|
+| $1D | `sound_timer` | Frames until next sound state |
+| $1E | `sound_state` | State machine (0=idle, 1-2=coin sound) |
+
+### APU Registers Used
+
+- `SQ1_VOL`, `SQ1_SWEEP`, `SQ1_LO`, `SQ1_HI` - Flap and crash whistle
+- `SQ2_VOL`, `SQ2_LO`, `SQ2_HI` - Coin/score sound
+- `NOISE_VOL`, `NOISE_LO`, `NOISE_HI` - Crash and ground hit
+
 ## Agents
 
 Use these agents for NES development tasks:
