@@ -16,9 +16,38 @@ make clean    # Clean build artifacts
 
 ```
 src/          # Assembly source and includes
+chr/          # CHR graphics data
 nes.cfg       # Linker config (NROM-256)
 build/        # Output directory
 ```
+
+## Sprite System
+
+The player character is a Koopa Paratroopa using a 2x3 sprite arrangement (16x24 pixels, 6 hardware sprites).
+
+### Tile Layout (Sprite Pattern Table $0000)
+
+| Frame 1 | Frame 2 | Position |
+|---------|---------|----------|
+| $01 $02 | $07 $08 | Top |
+| $03 $04 | $09 $0A | Middle |
+| $05 $06 | $0B $0C | Bottom |
+
+### Palette (Sprite Palette 0 at $3F10)
+
+| Index | Value | Color |
+|-------|-------|-------|
+| 0 | $22 | Light blue (sky/transparent) |
+| 1 | $1A | Green (shell) |
+| 2 | $30 | White (belly/face) |
+| 3 | $27 | Orange (feet/details) |
+
+### Animation
+
+Wing flapping animation runs during `STATE_PLAYING`:
+- `anim_timer` increments each frame
+- Every `ANIM_SPEED` (8) frames, `anim_frame` toggles between 0 and 6
+- Sprite tile indices = base tile ($01-$06) + `anim_frame` offset
 
 ## Agents
 

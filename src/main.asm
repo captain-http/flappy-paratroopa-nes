@@ -437,6 +437,34 @@ game_loop:
     sta OAM_BUFFER+16     ; Bottom-left
     sta OAM_BUFFER+20     ; Bottom-right
 
+    ; Update animation (wing flapping)
+    inc anim_timer
+    lda anim_timer
+    cmp #ANIM_SPEED
+    bcc @no_anim_update
+    lda #0
+    sta anim_timer
+    ; Toggle frame between 0 and 6
+    lda anim_frame
+    eor #6
+    sta anim_frame
+@no_anim_update:
+    ; Update sprite tiles based on animation frame
+    lda anim_frame
+    clc
+    adc #$01
+    sta OAM_BUFFER+1      ; Top-left tile
+    adc #1
+    sta OAM_BUFFER+5      ; Top-right tile
+    adc #1
+    sta OAM_BUFFER+9      ; Mid-left tile
+    adc #1
+    sta OAM_BUFFER+13     ; Mid-right tile
+    adc #1
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    adc #1
+    sta OAM_BUFFER+21     ; Bottom-right tile
+
     ; Scroll if bird is flying (not on ground)
     lda bird_y
     cmp #GROUND_Y

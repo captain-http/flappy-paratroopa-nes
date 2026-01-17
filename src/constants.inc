@@ -37,6 +37,11 @@ nt1_pipe0_gap = $14     ; NT1 pipe 0 gap row
 nt1_pipe1_gap = $15     ; NT1 pipe 1 gap row
 nt0_has_pipes = $16     ; 0 = NT0 empty, 1 = NT0 has pipes
 
+; Animation variables
+anim_timer    = $17     ; Animation frame counter
+anim_frame    = $18     ; Animation frame offset (0 or 6)
+ANIM_SPEED    = 8       ; Frames between animation updates
+
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row
 GAP_ROWS    = 8         ; Gap size in rows (64 pixels)
