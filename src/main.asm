@@ -173,6 +173,9 @@ reset:
     ; NT0 starts empty - flag prevents collision checks until drawn
     lda #0
     sta nt0_has_pipes
+    ; Initialize column drawing to idle (no active redraw)
+    lda #$FF
+    sta col_draw_idx
     ; NT1 gaps will be set by draw_pipes_in_nt during init
     jsr next_pipe_gap     ; Set initial pipe_gap for NT1 pipe 0
 
@@ -622,29 +625,26 @@ game_loop:
     lda scroll_nt
     eor #$01              ; Toggle bit 0
     sta scroll_nt
-    ; Queue pipe redraw for the nametable that just went off-screen
+    ; Queue column-based redraw for the nametable that just went off-screen
     ; scroll_nt = 1: switched TO NT1, queue NT0 redraw
     ; scroll_nt = 0: switched TO NT0, queue NT1 redraw
     beq @queue_nt1
     ; Switched to NT1 - queue NT0 redraw
-    lda #$20
-    sta nt_base
     ; Clear NT0 scored flags (bits 0-1)
     lda pipes_scored
     and #%11111100
     sta pipes_scored
-    jmp @queue_redraw
+    lda #$20
+    jsr start_column_redraw
+    jmp @no_scroll
 @queue_nt1:
     ; Switched to NT0 - queue NT1 redraw
-    lda #$24
-    sta nt_base
     ; Clear NT1 scored flags (bits 2-3)
     lda pipes_scored
     and #%11110011
     sta pipes_scored
-@queue_redraw:
-    lda #0
-    sta pipe_redraw
+    lda #$24
+    jsr start_column_redraw
 @no_scroll:
     jmp game_loop
 
@@ -841,13 +841,8 @@ nmi:
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
 
-    ; Check if we need to redraw pipes (two-frame approach)
-    ; draw_pipes_in_nt manages pipe_redraw state internally
-    lda pipe_redraw
-    cmp #$FF
-    beq @no_pipe_redraw
-    jsr draw_pipes_in_nt
-@no_pipe_redraw:
+    ; Column-based pipe/cloud drawing (one column per frame)
+    jsr draw_column
 
     ; Check if we need to clear title text
     lda clear_title
@@ -1551,10 +1546,386 @@ clear_title_text:
     rts
 
 ;===============================================================================
-; Pipe Drawing (called from NMI during vblank)
+; Column-Based Pipe/Cloud Drawing (called from NMI during vblank)
+;===============================================================================
+; Draws one vertical column per frame using PPUCTRL +32 increment mode.
+; Spreads redraw work across the entire scroll cycle (~128 frames per NT).
+;
+; Column layout (24 active columns):
+;   idx 0-3:   Pipe 0 columns 0-3
+;   idx 4-11:  Cloud zone A columns 4-11
+;   idx 12-15: Pipe 1 columns 16-19
+;   idx 16-23: Cloud zone B columns 20-27
+;   idx 24:    Attributes for pipe 0
+;   idx 25:    Attributes for pipe 1
+;   idx 26:    Draw clouds
+;   idx $FF:   Idle (no redraw in progress)
+;
+; Variables:
+;   col_draw_idx  - Current column index (0-26, $FF=idle)
+;   col_nt_base   - Nametable being redrawn ($20=NT0, $24=NT1)
+;   col_pipe0_gap - Gap row for pipe 0
+;   col_pipe1_gap - Gap row for pipe 1
+;===============================================================================
+
+draw_column:
+    ; Check if drawing is active
+    lda col_draw_idx
+    cmp #$FF
+    bne @active
+    rts                   ; Idle, nothing to do
+
+@active:
+    ; Dispatch based on column index
+    cmp #4
+    bcc @pipe0_col        ; 0-3: Pipe 0
+    cmp #12
+    bcc @cloud_a_col      ; 4-11: Cloud zone A
+    cmp #16
+    bcc @pipe1_col        ; 12-15: Pipe 1
+    cmp #24
+    bcc @cloud_b_col      ; 16-23: Cloud zone B
+    cmp #24
+    beq @pipe0_attrs      ; 24: Pipe 0 attributes
+    cmp #25
+    beq @pipe1_attrs      ; 25: Pipe 1 attributes
+    ; 26: Draw clouds and finish
+    jmp @draw_clouds
+
+;---------------------------------------
+; Pipe 0 columns (idx 0-3 -> cols 0-3)
+;---------------------------------------
+@pipe0_col:
+    ; Column = col_draw_idx
+    sta pipe_col
+    lda col_pipe0_gap
+    sta pipe_gap
+    jsr draw_pipe_column
+    jmp @next_column
+
+;---------------------------------------
+; Cloud zone A (idx 4-11 -> cols 4-11)
+;---------------------------------------
+@cloud_a_col:
+    ; Column = col_draw_idx (4-11)
+    sta pipe_col
+    jsr draw_empty_column
+    jmp @next_column
+
+;---------------------------------------
+; Pipe 1 columns (idx 12-15 -> cols 16-19)
+;---------------------------------------
+@pipe1_col:
+    ; Column = col_draw_idx - 12 + 16 = col_draw_idx + 4
+    clc
+    adc #4                ; idx 12->col 16, idx 13->col 17, etc.
+    sta pipe_col
+    lda col_pipe1_gap
+    sta pipe_gap
+    jsr draw_pipe_column
+    jmp @next_column
+
+;---------------------------------------
+; Cloud zone B (idx 16-23 -> cols 20-27)
+;---------------------------------------
+@cloud_b_col:
+    ; Column = col_draw_idx + 4 (idx 16->col 20, idx 17->col 21, etc.)
+    clc
+    adc #4
+    sta pipe_col
+    jsr draw_empty_column
+    jmp @next_column
+
+;---------------------------------------
+; Pipe 0 attributes
+;---------------------------------------
+@pipe0_attrs:
+    bit PPU_STATUS        ; Reset PPU latch
+    lda col_nt_base
+    sta nt_base
+    jsr draw_pipe0_attrs_only
+    jmp @next_column
+
+;---------------------------------------
+; Pipe 1 attributes
+;---------------------------------------
+@pipe1_attrs:
+    bit PPU_STATUS        ; Reset PPU latch
+    lda col_nt_base
+    sta nt_base
+    jsr draw_pipe1_attrs_only
+    jmp @next_column
+
+;---------------------------------------
+; Draw clouds and finish
+;---------------------------------------
+@draw_clouds:
+    bit PPU_STATUS        ; Reset PPU latch
+    lda col_nt_base
+    sta nt_base
+    jsr draw_random_clouds
+    ; Mark as done
+    lda #$FF
+    sta col_draw_idx
+    rts
+
+;---------------------------------------
+; Advance to next column
+;---------------------------------------
+@next_column:
+    inc col_draw_idx
+    rts
+
+;===============================================================================
+; Draw one vertical pipe column using PPUCTRL +32 mode
+; Input: pipe_col (0-31), pipe_gap, col_nt_base
+; Draws rows 0-25 (ground at row 26)
+;===============================================================================
+draw_pipe_column:
+    bit PPU_STATUS        ; Reset PPU latch
+
+    ; Set PPU address to row 0, column pipe_col
+    lda col_nt_base
+    sta PPU_ADDR
+    lda pipe_col
+    sta PPU_ADDR
+
+    ; Enable vertical increment mode (+32)
+    lda #%10010100        ; NMI on, sprites $0000, bg $1000, +32 increment
+    ora scroll_nt         ; Preserve current nametable for rendering
+    sta PPU_CTRL
+
+    ; Determine which column within pipe (0-3)
+    lda pipe_col
+    and #$03              ; 0, 1, 2, or 3
+    tax                   ; X = column within pipe
+
+    ; Draw rows 0 to 25
+    ldy #0                ; Y = current row
+@draw_loop:
+    ; Determine tile based on row and pipe structure
+    ; Top pipe body: rows 0 to (gap-3)
+    ; Top cap row 1: row (gap-2)
+    ; Top cap row 2: row (gap-1)
+    ; Gap: rows gap to (gap+7)
+    ; Bot cap row 1: row (gap+8)
+    ; Bot cap row 2: row (gap+9)
+    ; Bot pipe body: rows (gap+10) to 25
+
+    tya
+    clc
+    adc #3                ; A = row + 3
+    cmp pipe_gap          ; Compare (row + 3) with gap
+    bcc @top_body         ; row + 3 < gap => row < gap - 3 => top body
+
+    tya
+    clc
+    adc #2
+    cmp pipe_gap          ; Compare (row + 2) with gap
+    bcc @top_cap1         ; row + 2 < gap => row = gap - 2 => top cap row 1
+
+    tya
+    clc
+    adc #1
+    cmp pipe_gap
+    bcc @top_cap2         ; row + 1 < gap => row = gap - 1 => top cap row 2
+
+    tya
+    cmp pipe_gap
+    bcc @gap_tile         ; row < gap (shouldn't happen after above checks)
+
+    ; row >= gap
+    tya
+    sec
+    sbc pipe_gap          ; A = row - gap
+    cmp #GAP_ROWS
+    bcc @gap_tile         ; row - gap < 8 => in gap
+
+    ; row >= gap + 8
+    cmp #GAP_ROWS
+    beq @bot_cap1         ; row - gap = 8 => bot cap row 1
+
+    cmp #(GAP_ROWS + 1)
+    beq @bot_cap2         ; row - gap = 9 => bot cap row 2
+
+    ; row - gap >= 10 => bot body
+    jmp @bot_body
+
+@top_body:
+    ; Top pipe body tiles: $19, $1A, $1B, $1C (cols 0-3)
+    lda pipe_top_body_tiles, x
+    jmp @write_tile
+
+@top_cap1:
+    ; Top cap row 1 (under lip): $15, $16, $17, $18
+    lda pipe_top_cap1_tiles, x
+    jmp @write_tile
+
+@top_cap2:
+    ; Top cap row 2 (lip edge): $11, $12, $13, $14
+    lda pipe_top_cap2_tiles, x
+    jmp @write_tile
+
+@gap_tile:
+    ; Gap: empty tile
+    lda #$00
+    jmp @write_tile
+
+@bot_cap1:
+    ; Bot cap row 1: $05, $06, $07, $08
+    lda pipe_bot_cap1_tiles, x
+    jmp @write_tile
+
+@bot_cap2:
+    ; Bot cap row 2: $09, $0A, $0B, $0C
+    lda pipe_bot_cap2_tiles, x
+    jmp @write_tile
+
+@bot_body:
+    ; Bot pipe body: $0D, $0E, $0F, $10
+    lda pipe_bot_body_tiles, x
+    ; Fall through to write_tile
+
+@write_tile:
+    sta PPU_DATA
+    iny
+    cpy #26               ; Rows 0-25 (stop before ground at 26)
+    bcc @draw_loop
+
+    ; Restore horizontal increment mode (+1)
+    lda #%10010000        ; NMI on, sprites $0000, bg $1000, +1 increment
+    ora scroll_nt
+    sta PPU_CTRL
+    rts
+
+; Pipe tile lookup tables (indexed by column 0-3)
+pipe_top_body_tiles:
+    .byte $19, $1A, $1B, $1C
+pipe_top_cap1_tiles:
+    .byte $15, $16, $17, $18
+pipe_top_cap2_tiles:
+    .byte $11, $12, $13, $14
+pipe_bot_cap1_tiles:
+    .byte $05, $06, $07, $08
+pipe_bot_cap2_tiles:
+    .byte $09, $0A, $0B, $0C
+pipe_bot_body_tiles:
+    .byte $0D, $0E, $0F, $10
+
+;===============================================================================
+; Draw one vertical empty column (for cloud zones)
+; Input: pipe_col, col_nt_base
+; Clears rows 0-25 to empty sky tile
+;===============================================================================
+draw_empty_column:
+    bit PPU_STATUS        ; Reset PPU latch
+
+    ; Set PPU address to row 0, column pipe_col
+    lda col_nt_base
+    sta PPU_ADDR
+    lda pipe_col
+    sta PPU_ADDR
+
+    ; Enable vertical increment mode (+32)
+    lda #%10010100        ; NMI on, sprites $0000, bg $1000, +32 increment
+    ora scroll_nt
+    sta PPU_CTRL
+
+    ; Write 26 empty tiles (rows 0-25)
+    lda #$00
+    ldy #26
+@clear_loop:
+    sta PPU_DATA
+    dey
+    bne @clear_loop
+
+    ; Restore horizontal increment mode (+1)
+    lda #%10010000        ; NMI on, sprites $0000, bg $1000, +1 increment
+    ora scroll_nt
+    sta PPU_CTRL
+    rts
+
+;===============================================================================
+; Start column-based redraw for a nametable
+; Input: A = nametable base ($20=NT0, $24=NT1)
+; Generates random gaps for both pipes and starts drawing
+;===============================================================================
+start_column_redraw:
+    sta col_nt_base
+
+    ; Mark NT as having pipes (for collision detection)
+    cmp #$24
+    beq @nt1_setup
+    ; NT0 setup
+    lda #1
+    sta nt0_has_pipes
+    jmp @gen_gaps
+
+@nt1_setup:
+    ; NT1 (no special flag needed, always has pipes)
+
+@gen_gaps:
+    ; Generate random gap for pipe 0
+    jsr rand_lfsr
+    jsr calc_pipe_gap
+    sta col_pipe0_gap
+    ; Also store in collision tracking variable
+    lda col_nt_base
+    cmp #$24
+    beq @store_nt1_p0
+    lda col_pipe0_gap
+    sta nt0_pipe0_gap
+    jmp @gen_gap1
+@store_nt1_p0:
+    lda col_pipe0_gap
+    sta nt1_pipe0_gap
+
+@gen_gap1:
+    ; Generate random gap for pipe 1
+    jsr rand_lfsr
+    jsr calc_pipe_gap
+    sta col_pipe1_gap
+    ; Also store in collision tracking variable
+    lda col_nt_base
+    cmp #$24
+    beq @store_nt1_p1
+    lda col_pipe1_gap
+    sta nt0_pipe1_gap
+    jmp @start_draw
+@store_nt1_p1:
+    lda col_pipe1_gap
+    sta nt1_pipe1_gap
+
+@start_draw:
+    ; Start drawing at column 0
+    lda #0
+    sta col_draw_idx
+    rts
+
+;---------------------------------------
+; Calculate pipe gap from LFSR state
+; Returns gap value (GAP_MIN to GAP_MAX) in A
+;---------------------------------------
+calc_pipe_gap:
+    lda rng_lo
+    eor rng_hi            ; Mix both bytes
+    and #$0F              ; 0-15
+    cmp #(GAP_MAX - GAP_MIN + 1)
+    bcc @in_range         ; < 12, use as-is
+    sec
+    sbc #8                ; 12-15 -> 4-7
+@in_range:
+    clc
+    adc #GAP_MIN          ; Add base (4)
+    rts
+
+;===============================================================================
+; Legacy draw_pipes_in_nt (for initial NT1 setup during init)
+; This is called 8 times during init to draw NT1 pipes before game starts
+; Uses the old burst-draw approach (outside vblank, no constraint)
 ;===============================================================================
 draw_pipes_in_nt:
-    ; Multi-frame redraw to fit in vblank
+    ; Multi-frame redraw (used only during init)
     ; pipe_redraw = 0: draw pipe 0 body+cap, set to 1
     ; pipe_redraw = 1: draw pipe 0 gap clear, set to 2
     ; pipe_redraw = 2: draw pipe 0 bottom, set to 3
@@ -1562,14 +1933,7 @@ draw_pipes_in_nt:
     ; pipe_redraw = 4: draw pipe 1 body+cap, set to 5
     ; pipe_redraw = 5: draw pipe 1 gap clear, set to 6
     ; pipe_redraw = 6: draw pipe 1 bottom, set to 7
-    ; pipe_redraw = 7: draw pipe 1 attrs, set to 8
-    ; pipe_redraw = 8: clear cloud zone A (top half), set to 9
-    ; pipe_redraw = 9: clear cloud zone A (bottom half), set to 10
-    ; pipe_redraw = 10: clear cloud zone B (top half), set to 11
-    ; pipe_redraw = 11: clear cloud zone B (bottom half), set to 12
-    ; pipe_redraw = 12: draw new clouds, set to $FF (done)
-    ; pipe_redraw = $FF: skip (checked by NMI before calling)
-    ; Caller must set nt_base before queuing redraw
+    ; pipe_redraw = 7: draw pipe 1 attrs, done
 
     bit PPU_STATUS        ; Reset PPU latch
 
@@ -1601,71 +1965,14 @@ draw_pipes_in_nt:
     bne @not6
     jmp @frame6
 @not6:
-    cmp #7
-    bne @not7
-    jmp @frame7
-@not7:
-    cmp #8
-    bne @not8
-    jmp @frame8
-@not8:
-    cmp #9
-    bne @not9
-    jmp @frame9
-@not9:
-    cmp #10
-    bne @not10
-    jmp @frame10
-@not10:
-    cmp #11
-    bne @frame12
-    jmp @frame11
-
-@frame12:
-    ; Frame 13: Draw new random clouds
-    jsr draw_random_clouds
+    ; Frame 7: Draw pipe 1 bottom
+    jsr draw_pipe_bottom
     lda #$FF
-    sta pipe_redraw       ; Done
-    rts
-
-@frame11:
-    ; Frame 12: Clear cloud zone B bottom half (rows 6-10)
-    jsr clear_cloud_zone_b_bottom
-    lda #12
-    sta pipe_redraw
-    rts
-
-@frame10:
-    ; Frame 11: Clear cloud zone B top half (rows 2-5)
-    jsr clear_cloud_zone_b_top
-    lda #11
-    sta pipe_redraw
-    rts
-
-@frame9:
-    ; Frame 10: Clear cloud zone A bottom half (rows 6-10)
-    jsr clear_cloud_zone_a_bottom
-    lda #10
-    sta pipe_redraw
-    rts
-
-@frame8:
-    ; Frame 9: Clear cloud zone A top half (rows 2-5)
-    jsr clear_cloud_zone_a_top
-    lda #9
-    sta pipe_redraw
-    rts
-
-@frame7:
-    ; Frame 8: Draw pipe 1 attrs
-    jsr draw_pipe1_attrs_only
-    jsr next_pipe_gap     ; Increment gap for next pipe
-    lda #8
-    sta pipe_redraw       ; Continue to cloud clearing
+    sta pipe_redraw       ; Done with init
     rts
 
 @frame0:
-    ; Frame 1: Draw pipe 0 body+cap
+    ; Frame 0: Draw pipe 0 body+cap
     lda #0
     sta pipe_col
     ; Save gap to correct per-nametable variable
@@ -1676,11 +1983,11 @@ draw_pipes_in_nt:
     lda pipe_gap
     sta nt0_pipe0_gap
     lda #1
-    sta nt0_has_pipes     ; NT0 now has pipes
+    sta nt0_has_pipes
     jmp @frame0_draw
 @frame0_nt1:
     lda pipe_gap
-    sta nt1_pipe0_gap     ; NT1 pipe 0
+    sta nt1_pipe0_gap
 @frame0_draw:
     jsr draw_pipe_body_cap
     lda #1
@@ -1688,29 +1995,29 @@ draw_pipes_in_nt:
     rts
 
 @frame1:
-    ; Frame 2: Draw pipe 0 gap clear
+    ; Frame 1: Draw pipe 0 gap clear
     jsr draw_pipe_gap
     lda #2
     sta pipe_redraw
     rts
 
 @frame2:
-    ; Frame 3: Draw pipe 0 bottom
+    ; Frame 2: Draw pipe 0 bottom
     jsr draw_pipe_bottom
     lda #3
     sta pipe_redraw
     rts
 
 @frame3:
-    ; Frame 4: Draw pipe 0 attrs
+    ; Frame 3: Draw pipe 0 attrs
     jsr draw_pipe0_attrs_only
-    jsr next_pipe_gap     ; Increment gap for next pipe
+    jsr next_pipe_gap
     lda #4
     sta pipe_redraw
     rts
 
 @frame4:
-    ; Frame 5: Draw pipe 1 body+cap
+    ; Frame 4: Draw pipe 1 body+cap
     lda #16
     sta pipe_col
     ; Save gap to correct per-nametable variable
@@ -1718,11 +2025,11 @@ draw_pipes_in_nt:
     cmp #$24
     beq @frame4_nt1
     lda pipe_gap
-    sta nt0_pipe1_gap     ; NT0 pipe 1
+    sta nt0_pipe1_gap
     jmp @frame4_draw
 @frame4_nt1:
     lda pipe_gap
-    sta nt1_pipe1_gap     ; NT1 pipe 1
+    sta nt1_pipe1_gap
 @frame4_draw:
     jsr draw_pipe_body_cap
     lda #5
@@ -1730,15 +2037,17 @@ draw_pipes_in_nt:
     rts
 
 @frame5:
-    ; Frame 6: Draw pipe 1 gap clear
+    ; Frame 5: Draw pipe 1 gap clear
     jsr draw_pipe_gap
     lda #6
     sta pipe_redraw
     rts
 
 @frame6:
-    ; Frame 7: Draw pipe 1 bottom
+    ; Frame 6: Draw pipe 1 bottom
     jsr draw_pipe_bottom
+    ; Draw pipe 1 attrs (combine with frame 6)
+    jsr draw_pipe1_attrs_only
     lda #7
     sta pipe_redraw
     rts

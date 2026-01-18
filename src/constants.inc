@@ -74,6 +74,12 @@ cloud_row       = $25   ; Current cloud starting row
 cloud_size      = $26   ; Cloud size (0=single/4, 1=double/6, 2=triple/8)
 cloud_temp      = $27   ; Temporary variable
 
+; Column-based drawing variables
+col_draw_idx    = $28   ; Current column index (0-23, $FF=idle)
+col_nt_base     = $29   ; Nametable being redrawn ($20=NT0, $24=NT1)
+col_pipe0_gap   = $2A   ; Gap row for pipe 0 being drawn
+col_pipe1_gap   = $2B   ; Gap row for pipe 1 being drawn
+
 ; Shell sprite (death animation)
 SHELL_TILE_BASE = $1A   ; 2x2 shell tiles at $1A-$1D
 SHELL_FEET_BASE = $2A   ; Shell with feet showing at $2A-$2B
