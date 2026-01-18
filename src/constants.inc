@@ -99,7 +99,7 @@ STATE_WALK_OFF = 4      ; Walking left off screen
 STATE_FADE_OUT = 5      ; Fading to black, then full reset
 
 ; Stun timing
-STUN_DELAY     = 45     ; Frames to wait before walking (~0.75 sec)
+STUN_DELAY     = 75     ; Frames to wait before walking (~1.25 sec)
 
 ; Pipe collision constants (based on scroll position)
 ; Both pipes in NT1 (initial screen is empty)

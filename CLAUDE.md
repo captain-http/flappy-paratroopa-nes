@@ -50,18 +50,34 @@ Wing flapping animation runs during `STATE_PLAYING`:
 - Every `ANIM_SPEED` (8) frames, `anim_frame` toggles between 0 and 6
 - Sprite tile indices = base tile ($01-$06) + `anim_frame` offset
 
-### Death Animation (Shell)
+### Death Sequence
 
-When the Koopa dies (pipe collision or ground hit), it hides in its shell:
+When the Koopa dies, it goes through a multi-state animation:
+
+1. **Shell** (`STATE_DYING`/`STATE_STUNNED`): Hides in shell, falls to ground
+2. **Stunned**: Feet peek out animation (toggles every 10 frames)
+3. **Walk Off** (`STATE_WALK_OFF`): Walks left off screen
+4. **Fade Out** (`STATE_FADE_OUT`): Palette fades to black, then full reset
+
+**Shell Tiles (2x2):**
 
 | Tile | Position |
 |------|----------|
 | $1A $1B | Top |
-| $1C $1D | Bottom |
+| $1C $1D | Bottom (or $2A $2B with feet) |
 
-- 2x2 sprite arrangement (16x16 pixels, 4 hardware sprites)
-- Top 2 sprites hidden (Y = $FF)
-- `switch_to_shell` subroutine handles the transition
+**Walking Tiles (2x3):**
+
+| Frame 1 | Frame 2 | Position |
+|---------|---------|----------|
+| $1E $1F | $24 $25 | Top |
+| $20 $21 | $26 $27 | Middle |
+| $22 $23 | $28 $29 | Bottom |
+
+**Key subroutines:**
+- `switch_to_shell` - Transition to shell sprite
+- `switch_to_walking` - Transition to walking sprite
+- `apply_fade_palette` - Apply current fade level
 
 ## Scoring System
 

@@ -227,10 +227,37 @@ Worst frame (body): ~1275 cycles  ✓ fits with margin
 └───┴───┘
 ```
 
-**Animation frames:**
+**Animation frames (flying):**
 - Frame 1: tiles $01-$06 (wings up)
 - Frame 2: tiles $07-$0C (wings down)
 - Toggles every 8 frames during `STATE_PLAYING`
+
+**Shell sprite (2x2, death):**
+```
+┌───┬───┐
+│$1A│$1B│  Top row
+├───┼───┤
+│$1C│$1D│  Bottom row (or $2A-$2B with feet)
+└───┴───┘
+```
+- Used during `STATE_DYING` and `STATE_STUNNED`
+- Top 2 sprites hidden (Y=$FF), shell uses middle/bottom sprite slots
+- Feet animation: toggles bottom tiles between $1C/$1D and $2A/$2B every 10 frames
+
+**Walking sprite (2x3, no wings):**
+```
+Frame 1: $1E-$23    Frame 2: $24-$29
+┌───┬───┐           ┌───┬───┐
+│$1E│$1F│           │$24│$25│
+├───┼───┤           ├───┼───┤
+│$20│$21│           │$26│$27│
+├───┼───┤           ├───┼───┤
+│$22│$23│           │$28│$29│
+└───┴───┘           └───┴───┘
+```
+- Used during `STATE_WALK_OFF`
+- Animation toggles every 8 frames
+- Sprites hidden (Y=$FF) when X position wraps past screen edge
 
 **Sprite palette 0:** `$22, $1A, $30, $27`
 - $22: Light blue (transparent)
@@ -297,32 +324,39 @@ Flap gives -4 pixels/frame upward velocity, which gravity counteracts over time 
 
 ## Game State
 
-**Decision:** Four-state machine for game flow.
+**Decision:** Six-state machine for game flow with animated death sequence.
 
 **Variables:**
 | Variable | Address | Description |
 |----------|---------|-------------|
-| game_state | $0A | 0 = waiting, 1 = playing, 2 = dying, 3 = dead |
+| game_state | $0A | Current state (0-5) |
 
 **States:**
 | State | Value | Behavior |
 |-------|-------|----------|
-| STATE_WAITING | 0 | Bird visible, waiting for A/B to start |
+| STATE_WAITING | 0 | Bird visible, "PRESS A OR B" text shown, waiting to start |
 | STATE_PLAYING | 1 | Normal gameplay, input + physics + scrolling |
-| STATE_DYING | 2 | No input, gravity only, bird falls |
-| STATE_DEAD | 3 | Fully frozen, waiting for reset |
+| STATE_DYING | 2 | Shell falls (no input, gravity only) |
+| STATE_STUNNED | 3 | Shell on ground, feet animation, waiting to recover |
+| STATE_WALK_OFF | 4 | Koopa walks left off screen |
+| STATE_FADE_OUT | 5 | Palette fades to black, then full reset |
 
-**Triggers:**
-- A/B button press in WAITING → STATE_PLAYING (game starts)
-- Pipe collision → STATE_DYING (bird tumbles down)
-- Ground collision → STATE_DEAD (fully frozen)
+**Death Sequence:**
+1. Pipe/ground collision → `STATE_DYING` (switch to shell, falls)
+2. Shell hits ground → `STATE_STUNNED` (75 frames, feet peek animation)
+3. Stun ends → `STATE_WALK_OFF` (switch to walking sprite, walk left)
+4. Off screen → `STATE_FADE_OUT` (5-step palette fade)
+5. Fully black → `jmp reset` (clean restart)
+
+**Title Text:**
+- "PRESS A OR B" displayed at PPU address $21CA during STATE_WAITING
+- Uses alphabet tiles $20-$39 in background pattern table
+- Cleared via `clear_title` flag when transitioning to STATE_PLAYING
 
 **Pipe collision detection:**
 - Check all 4 pipes (2 per nametable) based on scroll position
 - Use per-nametable gap tracking for correct collision
 - Skip NT0 collision checks until NT0 has been drawn (`nt0_has_pipes` flag)
-
-**Future:** Press Start to reset game.
 
 ## Random Pipe Heights
 
@@ -548,3 +582,63 @@ Timer = CPU_FREQ / (16 × freq) - 1
 B5 (988 Hz) → timer $70
 E6 (1318 Hz) → timer $54
 ```
+
+## Death Sequence & Fade System
+
+**Decision:** Animated death sequence with palette fade instead of instant game over.
+
+**Death Sequence Variables:**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| bird_x | $20 | Bird X position (for walk-off) |
+| fade_timer | $21 | Multi-purpose timer (stun delay, fade delay) |
+| fade_step | $22 | Current fade level (0=normal, 4=black) |
+| update_palette | $23 | Flag to update palette in NMI |
+| clear_title | $1F | Flag to clear title text in NMI |
+
+**Constants:**
+```
+STUN_DELAY      = 75    ; Frames before walking (~1.25 sec)
+FADE_DELAY      = 15    ; Frames per fade step
+STUN_ANIM_SPEED = 10    ; Frames between feet animation
+WALK_ANIM_SPEED = 8     ; Frames between walk animation
+```
+
+**Fade Palette System:**
+
+5-level fade from normal colors to black ($0F):
+```
+Level 0: Normal palette
+Level 1: Darker
+Level 2: Even darker
+Level 3: Near black
+Level 4: All $0F (black)
+```
+
+Fade palettes stored in `fade_palette_bg` and `fade_palette_spr` tables (5 × 16 bytes each).
+
+**Sequence Flow:**
+```
+STATE_DYING:
+  - Shell sprite falls with gravity
+  - On ground hit → STATE_STUNNED
+
+STATE_STUNNED:
+  - fade_timer counts down from STUN_DELAY (75)
+  - Feet animation toggles every STUN_ANIM_SPEED (10) frames
+  - On timer expiry → STATE_WALK_OFF
+
+STATE_WALK_OFF:
+  - bird_x decrements each frame
+  - Walk animation toggles every WALK_ANIM_SPEED (8) frames
+  - Sprites hidden when bird_x >= $80 (off left edge)
+  - When bird_x reaches $F0 → STATE_FADE_OUT
+
+STATE_FADE_OUT:
+  - fade_timer counts down from FADE_DELAY (15)
+  - On expiry, increment fade_step and apply darker palette
+  - When fade_step reaches 5 → jmp reset
+```
+
+**Why full reset:**
+Using `jmp reset` instead of soft reset ensures clean state (pipes, nametables, variables) without visual glitches.
