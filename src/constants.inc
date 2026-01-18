@@ -59,6 +59,9 @@ SCORE_X_ONES     = 128  ; X position of ones digit
 sound_timer     = $1D   ; Frames until next sound state
 sound_state     = $1E   ; 0=idle, 1=coin B5, 2=coin E6
 
+; Shell sprite (death animation)
+SHELL_TILE_BASE = $1A   ; 2x2 shell tiles at $1A-$1D
+
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row
 GAP_ROWS    = 8         ; Gap size in rows (64 pixels)

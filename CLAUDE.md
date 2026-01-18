@@ -50,6 +50,19 @@ Wing flapping animation runs during `STATE_PLAYING`:
 - Every `ANIM_SPEED` (8) frames, `anim_frame` toggles between 0 and 6
 - Sprite tile indices = base tile ($01-$06) + `anim_frame` offset
 
+### Death Animation (Shell)
+
+When the Koopa dies (pipe collision or ground hit), it hides in its shell:
+
+| Tile | Position |
+|------|----------|
+| $1A $1B | Top |
+| $1C $1D | Bottom |
+
+- 2x2 sprite arrangement (16x16 pixels, 4 hardware sprites)
+- Top 2 sprites hidden (Y = $FF)
+- `switch_to_shell` subroutine handles the transition
+
 ## Scoring System
 
 Score increments when the bird passes a pipe (pipe's right edge passes bird's left edge).

@@ -428,6 +428,11 @@ game_loop:
 
     ; Check pipe collision
     jsr check_pipe_collision
+    lda game_state
+    cmp #STATE_DYING
+    bne @no_collision_skip
+    jmp @dying_state          ; Collision happened, skip to dying
+@no_collision_skip:
 
     ; Check for scoring (passing pipes)
     jsr check_score
@@ -482,7 +487,19 @@ game_loop:
     sta bird_y_frac
     lda #STATE_DEAD       ; Fully dead
     sta game_state
+    jsr switch_to_shell
+    ; Update shell Y positions before freezing
+    lda bird_y
+    clc
+    adc #8
+    sta OAM_BUFFER+8      ; Mid-left
+    sta OAM_BUFFER+12     ; Mid-right
+    clc
+    adc #8
+    sta OAM_BUFFER+16     ; Bottom-left
+    sta OAM_BUFFER+20     ; Bottom-right
     jsr play_ground_hit   ; Just noise burst (no whistle)
+    jmp @dead_state       ; Skip animation update
 @no_ground:
 
     ; Update sprite Y positions (2x3 bird)
@@ -596,17 +613,16 @@ game_loop:
     sta game_state
 @dying_no_ground:
 
+    ; Update shell sprite Y positions (2x2, skip hidden top sprites)
     lda bird_y
-    sta OAM_BUFFER+0
-    sta OAM_BUFFER+4
     clc
     adc #8
-    sta OAM_BUFFER+8
-    sta OAM_BUFFER+12
+    sta OAM_BUFFER+8      ; Mid-left
+    sta OAM_BUFFER+12     ; Mid-right
     clc
     adc #8
-    sta OAM_BUFFER+16
-    sta OAM_BUFFER+20
+    sta OAM_BUFFER+16     ; Bottom-left
+    sta OAM_BUFFER+20     ; Bottom-right
 
     jmp game_loop
 
@@ -825,6 +841,7 @@ check_pipe_collision:
     ; Bird hit pipe - start dying
     lda #STATE_DYING
     sta game_state
+    jsr switch_to_shell
     jsr play_crash_sound
     rts
 
@@ -1055,6 +1072,28 @@ update_sound:
     lda #0
     sta sound_state
 @sound_done:
+    rts
+
+;===============================================================================
+; Switch to Shell Sprite (Death Animation)
+;===============================================================================
+switch_to_shell:
+    ; Hide top 2 sprites (head/wings disappear)
+    lda #$FF
+    sta OAM_BUFFER+0      ; Top-left Y (hidden)
+    sta OAM_BUFFER+4      ; Top-right Y (hidden)
+
+    ; Update middle sprites to shell top row
+    lda #SHELL_TILE_BASE
+    sta OAM_BUFFER+9      ; Mid-left tile = $1A
+    lda #(SHELL_TILE_BASE + 1)
+    sta OAM_BUFFER+13     ; Mid-right tile = $1B
+
+    ; Update bottom sprites to shell bottom row
+    lda #(SHELL_TILE_BASE + 2)
+    sta OAM_BUFFER+17     ; Bottom-left tile = $1C
+    lda #(SHELL_TILE_BASE + 3)
+    sta OAM_BUFFER+21     ; Bottom-right tile = $1D
     rts
 
 ;===============================================================================
