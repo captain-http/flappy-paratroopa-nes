@@ -393,6 +393,17 @@ reset:
     dex
     bne @attr1_ground
 
+    ; Set pipe attributes for BOTH nametables at init
+    ; This way we never need to redraw them during gameplay
+    lda #$20
+    sta nt_base
+    jsr draw_pipe0_attrs_only
+    jsr draw_pipe1_attrs_only
+    lda #$24
+    sta nt_base
+    jsr draw_pipe0_attrs_only
+    jsr draw_pipe1_attrs_only
+
     ;=========================================================================
     ; CLOUDS - Randomized placement
     ;=========================================================================
@@ -1549,20 +1560,20 @@ clear_title_text:
 ; Column-Based Pipe/Cloud Drawing (called from NMI during vblank)
 ;===============================================================================
 ; Draws one vertical column per frame using PPUCTRL +32 increment mode.
-; Spreads redraw work across the entire scroll cycle (~128 frames per NT).
+; Spreads redraw work across ~25 frames instead of burst-drawing.
 ;
-; Column layout (24 active columns):
+; Column layout:
 ;   idx 0-3:   Pipe 0 columns 0-3
-;   idx 4-11:  Cloud zone A columns 4-11
+;   idx 4-11:  Cloud zone A columns 4-11 (cleared to empty)
 ;   idx 12-15: Pipe 1 columns 16-19
-;   idx 16-23: Cloud zone B columns 20-27
-;   idx 24:    Attributes for pipe 0
-;   idx 25:    Attributes for pipe 1
-;   idx 26:    Draw clouds
+;   idx 16-23: Cloud zone B columns 20-27 (cleared to empty)
+;   idx 24:    Draw clouds, mark done
 ;   idx $FF:   Idle (no redraw in progress)
 ;
+; Note: Pipe attributes are set once at init and never changed.
+;
 ; Variables:
-;   col_draw_idx  - Current column index (0-26, $FF=idle)
+;   col_draw_idx  - Current column index (0-24, $FF=idle)
 ;   col_nt_base   - Nametable being redrawn ($20=NT0, $24=NT1)
 ;   col_pipe0_gap - Gap row for pipe 0
 ;   col_pipe1_gap - Gap row for pipe 1
@@ -1577,6 +1588,7 @@ draw_column:
 
 @active:
     ; Dispatch based on column index
+    ; Pipe attributes set at init, no need to redraw
     cmp #4
     bcc @pipe0_col        ; 0-3: Pipe 0
     cmp #12
@@ -1585,11 +1597,7 @@ draw_column:
     bcc @pipe1_col        ; 12-15: Pipe 1
     cmp #24
     bcc @cloud_b_col      ; 16-23: Cloud zone B
-    cmp #24
-    beq @pipe0_attrs      ; 24: Pipe 0 attributes
-    cmp #25
-    beq @pipe1_attrs      ; 25: Pipe 1 attributes
-    ; 26: Draw clouds and finish
+    ; 24: Draw clouds and finish
     jmp @draw_clouds
 
 ;---------------------------------------
@@ -1637,27 +1645,8 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Pipe 0 attributes
-;---------------------------------------
-@pipe0_attrs:
-    bit PPU_STATUS        ; Reset PPU latch
-    lda col_nt_base
-    sta nt_base
-    jsr draw_pipe0_attrs_only
-    jmp @next_column
-
-;---------------------------------------
-; Pipe 1 attributes
-;---------------------------------------
-@pipe1_attrs:
-    bit PPU_STATUS        ; Reset PPU latch
-    lda col_nt_base
-    sta nt_base
-    jsr draw_pipe1_attrs_only
-    jmp @next_column
-
-;---------------------------------------
-; Draw clouds and finish
+; Draw clouds and finish (idx 24)
+; Pipe attributes are set at init, no redraw needed
 ;---------------------------------------
 @draw_clouds:
     bit PPU_STATUS        ; Reset PPU latch
