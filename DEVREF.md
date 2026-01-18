@@ -167,19 +167,22 @@ Spacing: 384 - 256 = 128 pixels
 
 **Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view (~2.1 seconds at 2px/frame).
 
-**Eight-Frame Redraw:**
+**Eleven-Frame Redraw (Pipes + Clouds):**
 
-Drawing a full pipe column requires ~2400 cycles (26 rows × ~92 cycles/row), which exceeds vblank. The gap position also varies, making top-half row count variable (4-23 rows). Solution: split each pipe into 4 parts across 8 total frames.
+Drawing a full pipe column requires ~2400 cycles (26 rows × ~92 cycles/row), which exceeds vblank. The gap position also varies, making top-half row count variable (4-23 rows). Solution: split each pipe into 4 parts, plus 3 frames for cloud regeneration.
 
 ```
-Frame 0: pipe 0 body+cap   → set pipe_redraw=1
-Frame 1: pipe 0 gap clear  → set pipe_redraw=2
-Frame 2: pipe 0 bottom     → set pipe_redraw=3
-Frame 3: pipe 0 attrs      → set pipe_redraw=4, next_pipe_gap
-Frame 4: pipe 1 body+cap   → set pipe_redraw=5
-Frame 5: pipe 1 gap clear  → set pipe_redraw=6
-Frame 6: pipe 1 bottom     → set pipe_redraw=7
-Frame 7: pipe 1 attrs      → set pipe_redraw=$FF, next_pipe_gap
+Frame 0:  pipe 0 body+cap   → set pipe_redraw=1
+Frame 1:  pipe 0 gap clear  → set pipe_redraw=2
+Frame 2:  pipe 0 bottom     → set pipe_redraw=3
+Frame 3:  pipe 0 attrs      → set pipe_redraw=4, next_pipe_gap
+Frame 4:  pipe 1 body+cap   → set pipe_redraw=5
+Frame 5:  pipe 1 gap clear  → set pipe_redraw=6
+Frame 6:  pipe 1 bottom     → set pipe_redraw=7
+Frame 7:  pipe 1 attrs      → set pipe_redraw=8, next_pipe_gap
+Frame 8:  clear cloud zone A → set pipe_redraw=9
+Frame 9:  clear cloud zone B → set pipe_redraw=10
+Frame 10: draw random clouds → set pipe_redraw=$FF
 ```
 
 | Frame | What | Max Rows | Max Cycles |
@@ -642,3 +645,108 @@ STATE_FADE_OUT:
 
 **Why full reset:**
 Using `jmp reset` instead of soft reset ensures clean state (pipes, nametables, variables) without visual glitches.
+
+## Cloud System
+
+**Decision:** Pattern-based randomized clouds that regenerate on nametable wrap.
+
+**Cloud Tile Layout (Pattern Table 1, $1000):**
+```
+Tiles $3A-$42 (9 tiles total):
+  Row 0 (bumps):  $00 $3A $3B $00  (corners empty, bumps in middle)
+  Row 1 (body):   $3C $3D $3D $3E  (left edge, fill, right edge)
+  Row 2 (bottom): $3F $40 $41 $42  (left edge, fill pair, right edge)
+```
+
+**Cloud Sizes:**
+| Size | Width | Bump Pairs | Tile Pattern |
+|------|-------|------------|--------------|
+| Single | 4 tiles | 1 | $00 $3A $3B $00 |
+| Double | 6 tiles | 2 | $00 $3A $3B $3A $3B $00 |
+| Triple | 8 tiles | 3 | $00 $3A $3B $3A $3B $3A $3B $00 |
+
+**Cloud Zones (avoiding pipe columns):**
+- Zone A: columns 4-11 (before pipe 0 at column 0-3)
+- Zone B: columns 20-27 (between pipe 0 and pipe 1 at column 16-19)
+
+**Cloud Patterns (16 curated):**
+```
+Pattern 0:  Empty (no clouds)
+Pattern 1:  Single high (zone A)
+Pattern 2:  Single low (zone B)
+Pattern 3:  Double mid (zone A)
+Pattern 4:  Triple high (zone B)
+Pattern 5:  Single + Single (different heights)
+Pattern 6:  Single + Double
+Pattern 7:  Double + Single
+Pattern 8:  Triple + Single
+Pattern 9:  Single + Triple
+Pattern 10: Double + Double
+Pattern 11: Single low (zone A) - variation
+Pattern 12: Single high (zone B) - variation
+Pattern 13: Double (zone B)
+Pattern 14: Triple (zone A)
+Pattern 15: Single + Single (both high)
+```
+
+**Pattern Data Format (6 bytes each):**
+```
+col1, size1, row1, col2, size2, row2
+- col = 0: no cloud
+- col = 4-11: zone A
+- col = 20-27: zone B
+- size = 0/1/2: single/double/triple
+- row = 2-8: CLOUD_ROW_MIN to CLOUD_ROW_MAX
+```
+
+**Cloud Variables (Zero Page):**
+| Variable | Address | Description |
+|----------|---------|-------------|
+| cloud_col | $24 | Current cloud column |
+| cloud_row | $25 | Current cloud row |
+| cloud_size | $26 | Current cloud size (0-2) |
+| cloud_temp | $27 | Temporary variable |
+
+**Palette 3 (Clouds):**
+```
+$22: Sky blue (color 0, transparent)
+$30: White (cloud body)
+$21: Cyan (cloud shading)
+$0F: Black (outline)
+```
+
+**Sky Attribute Prefill:**
+
+At init, entire sky area (attr rows 0-5) is set to palette 3 ($FF = all quadrants). This ensures:
+- Empty sky tiles still appear as sky blue (color 0)
+- All clouds automatically use correct palette
+- No per-cloud attribute management needed
+- Pipe drawing overwrites columns 0 and 4 with pipe palette
+
+**Cloud Regeneration on Scroll:**
+
+Clouds regenerate when nametables wrap, integrated into pipe redraw state machine:
+```
+Frame 0-7:  Pipe drawing (existing)
+Frame 8:    Clear cloud zone A (8 cols × 9 rows)
+Frame 9:    Clear cloud zone B (8 cols × 9 rows)
+Frame 10:   Draw new random cloud pattern
+Frame 11:   Done ($FF)
+```
+
+**Clearing Algorithm:**
+- Write $00 (empty tile) to columns 4-11 and 20-27
+- Rows 2-10 (CLOUD_ROW_MIN to CLOUD_ROW_MAX+2)
+- 72 tiles per zone, split across 2 frames
+
+**Pattern Selection:**
+```asm
+jsr rand_lfsr
+lda rng_hi            ; Use high byte for better entropy
+and #$0F              ; 0-15 (16 patterns)
+; Multiply by 6 to get pattern offset
+```
+
+**Title Text Consideration:**
+
+"PRESS A OR B" text uses background tiles in sky area, which now uses palette 3. Alphabet tiles ($20-$39) should be drawn with palette 3 colors (white for visibility against sky blue).

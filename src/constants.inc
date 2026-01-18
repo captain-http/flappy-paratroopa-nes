@@ -68,6 +68,12 @@ fade_timer      = $21   ; Frames until next fade step
 fade_step       = $22   ; Current fade level (0=normal, 4=black)
 update_palette  = $23   ; Flag to update palette in NMI
 
+; Cloud drawing variables (used during init)
+cloud_col       = $24   ; Current cloud starting column
+cloud_row       = $25   ; Current cloud starting row
+cloud_size      = $26   ; Cloud size (0=single/4, 1=double/6, 2=triple/8)
+cloud_temp      = $27   ; Temporary variable
+
 ; Shell sprite (death animation)
 SHELL_TILE_BASE = $1A   ; 2x2 shell tiles at $1A-$1D
 SHELL_FEET_BASE = $2A   ; Shell with feet showing at $2A-$2B
@@ -83,6 +89,18 @@ FADE_DELAY      = 15    ; Frames per fade step
 
 ; Alphabet tiles (background pattern table)
 ALPHA_TILE_BASE = $20   ; A=$20, B=$21, ... Z=$39
+
+; Cloud tiles (background pattern table)
+CLOUD_TILE_BASE = $3A   ; Cloud tiles at $3A-$42
+
+; Cloud layout constants
+CLOUD_ROW_MIN   = 2     ; Minimum cloud row (near top)
+CLOUD_ROW_MAX   = 8     ; Maximum cloud row (above ground)
+CLOUD_ZONE_A    = 4     ; Zone A start column (cols 4-11, before pipes)
+CLOUD_ZONE_B    = 20    ; Zone B start column (cols 20-27, after pipe 0)
+
+; Cloud sizes (width in tiles)
+; Single = 4 tiles, Double = 6 tiles, Triple = 8 tiles
 
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row

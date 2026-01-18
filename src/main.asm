@@ -105,6 +105,16 @@ reset:
     lda #$0F              ; Color 3 - black
     sta PPU_DATA
 
+    ; Background palette 3 (clouds)
+    lda #$22              ; Color 0 (mirrors to universal bg)
+    sta PPU_DATA
+    lda #$30              ; Color 1 - white (cloud body)
+    sta PPU_DATA
+    lda #$21              ; Color 2 - cyan (cloud shading)
+    sta PPU_DATA
+    lda #$0F              ; Color 3 - black (outline)
+    sta PPU_DATA
+
     ; Sprite palette 0 ($3F10) - Koopa Paratroopa colors
     lda #$3F
     sta PPU_ADDR
@@ -329,31 +339,64 @@ reset:
     dex
     bne @fill_ground1_row29
 
-    ; Set attribute tables for ground (palette 1)
-    ; Ground at rows 26-29 = attr row 6 and 7
-    ; $23F0 = attribute row 6, $23F8 = attribute row 7
+    ; Set attribute tables
+    ; Sky area (rows 0-5): palette 3 for clouds
+    ; Ground area (rows 6-7): palette 1
+
+    ; NT0 sky attributes (rows 0-5 = 48 bytes at $23C0-$23EF)
     lda #$23
     sta PPU_ADDR
-    lda #$F0
-    sta PPU_ADDR          ; $23F0 = attribute row 6
+    lda #$C0
+    sta PPU_ADDR          ; $23C0 = attribute row 0
+    lda #$FF              ; %11111111 = palette 3 for all quadrants
+    ldx #48               ; 6 rows * 8 bytes
+@attr0_sky:
+    sta PPU_DATA
+    dex
+    bne @attr0_sky
+
+    ; NT0 ground attributes (rows 6-7 = 16 bytes at $23F0-$23FF)
     lda #$55              ; %01010101 = palette 1 for all
-    ldx #16               ; 8 bytes row 6 + 8 bytes row 7
+    ldx #16
 @attr0_ground:
     sta PPU_DATA
     dex
     bne @attr0_ground
 
-    ; Nametable 1 attributes
+    ; NT1 sky attributes (rows 0-5 = 48 bytes at $27C0-$27EF)
     lda #$27
     sta PPU_ADDR
-    lda #$F0
-    sta PPU_ADDR          ; $27F0 = attribute row 6
-    lda #$55
-    ldx #16               ; 8 bytes row 6 + 8 bytes row 7
+    lda #$C0
+    sta PPU_ADDR          ; $27C0 = attribute row 0
+    lda #$FF              ; %11111111 = palette 3 for all quadrants
+    ldx #48
+@attr1_sky:
+    sta PPU_DATA
+    dex
+    bne @attr1_sky
+
+    ; NT1 ground attributes (rows 6-7 = 16 bytes at $27F0-$27FF)
+    lda #$55              ; %01010101 = palette 1 for all
+    ldx #16
 @attr1_ground:
     sta PPU_DATA
     dex
     bne @attr1_ground
+
+    ;=========================================================================
+    ; CLOUDS - Randomized placement
+    ;=========================================================================
+    bit PPU_STATUS
+
+    ; Draw random clouds in NT0
+    lda #$20
+    sta nt_base
+    jsr draw_random_clouds
+
+    ; Draw random clouds in NT1
+    lda #$24
+    sta nt_base
+    jsr draw_random_clouds
 
     ; Draw pipes in NT1 (initial screen is empty NT0)
     ; Use eight-frame drawing routine (outside vblank, no constraint)
@@ -1279,22 +1322,22 @@ fade_palette_bg:
     .byte $22, $22, $30, $22  ; Palette 0: sky + text
     .byte $22, $36, $17, $0F  ; Palette 1: ground
     .byte $22, $29, $1A, $0F  ; Palette 2: pipes
-    .byte $22, $22, $22, $22  ; Palette 3: unused
+    .byte $22, $30, $21, $0F  ; Palette 3: clouds
     ; Level 1 (-$10)
     .byte $12, $12, $20, $12
     .byte $12, $26, $07, $0F
     .byte $12, $19, $0A, $0F
-    .byte $12, $12, $12, $12
+    .byte $12, $20, $11, $0F
     ; Level 2 (-$20)
     .byte $02, $02, $10, $02
     .byte $02, $16, $07, $0F
     .byte $02, $09, $0A, $0F
-    .byte $02, $02, $02, $02
+    .byte $02, $10, $01, $0F
     ; Level 3 (-$30)
     .byte $0F, $0F, $00, $0F
     .byte $0F, $06, $07, $0F
     .byte $0F, $09, $0A, $0F
-    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $00, $01, $0F
     ; Level 4 (black)
     .byte $0F, $0F, $0F, $0F
     .byte $0F, $0F, $0F, $0F
@@ -1504,7 +1547,7 @@ clear_title_text:
 ; Pipe Drawing (called from NMI during vblank)
 ;===============================================================================
 draw_pipes_in_nt:
-    ; Eight-frame pipe redraw to fit in vblank
+    ; Multi-frame redraw to fit in vblank
     ; pipe_redraw = 0: draw pipe 0 body+cap, set to 1
     ; pipe_redraw = 1: draw pipe 0 gap clear, set to 2
     ; pipe_redraw = 2: draw pipe 0 bottom, set to 3
@@ -1512,7 +1555,10 @@ draw_pipes_in_nt:
     ; pipe_redraw = 4: draw pipe 1 body+cap, set to 5
     ; pipe_redraw = 5: draw pipe 1 gap clear, set to 6
     ; pipe_redraw = 6: draw pipe 1 bottom, set to 7
-    ; pipe_redraw = 7: draw pipe 1 attrs, set to $FF (done)
+    ; pipe_redraw = 7: draw pipe 1 attrs, set to 8
+    ; pipe_redraw = 8: clear cloud zone A, set to 9
+    ; pipe_redraw = 9: clear cloud zone B, set to 10
+    ; pipe_redraw = 10: draw new clouds, set to $FF (done)
     ; pipe_redraw = $FF: skip (checked by NMI before calling)
     ; Caller must set nt_base before queuing redraw
 
@@ -1527,19 +1573,56 @@ draw_pipes_in_nt:
     cmp #3
     beq @frame3
     cmp #4
-    beq @frame4
+    bne @not4
+    jmp @frame4
+@not4:
     cmp #5
-    beq @frame5
+    bne @not5
+    jmp @frame5
+@not5:
     cmp #6
-    beq @frame6
-    ; Fall through to frame 7
+    bne @not6
+    jmp @frame6
+@not6:
+    cmp #7
+    bne @not7
+    jmp @frame7
+@not7:
+    cmp #8
+    bne @not8
+    jmp @frame8
+@not8:
+    cmp #9
+    bne @frame10
+    jmp @frame9
+
+@frame10:
+    ; Frame 11: Draw new random clouds
+    jsr draw_random_clouds
+    lda #$FF
+    sta pipe_redraw       ; Done
+    rts
+
+@frame9:
+    ; Frame 10: Clear cloud zone B (cols 20-27, rows 2-10)
+    jsr clear_cloud_zone_b
+    lda #10
+    sta pipe_redraw
+    rts
+
+@frame8:
+    ; Frame 9: Clear cloud zone A (cols 4-11, rows 2-10)
+    jsr clear_cloud_zone_a
+    lda #9
+    sta pipe_redraw
+    rts
 
 @frame7:
     ; Frame 8: Draw pipe 1 attrs
     jsr draw_pipe1_attrs_only
     jsr next_pipe_gap     ; Increment gap for next pipe
-    lda #$FF
-    sta pipe_redraw       ; Done
+    lda #8
+    sta pipe_redraw       ; Continue to cloud clearing
     rts
 
 @frame0:
@@ -1954,6 +2037,280 @@ draw_pipe1_attrs_only:
     sec
     sbc #3
     sta nt_base
+    rts
+
+;===============================================================================
+; Pattern-Based Cloud Drawing
+; Called during init to draw clouds from curated patterns
+;===============================================================================
+
+; Cloud width lookup table (indexed by cloud_size)
+cloud_widths:
+    .byte 4, 6, 8         ; single=4, double=6, triple=8
+
+; Cloud patterns: 16 patterns x 6 bytes each
+; Format: col1, size1, row1, col2, size2, row2
+; col=0 means no cloud, col=4-11 is zone A, col=20-27 is zone B
+PATTERN_COUNT = 16
+cloud_patterns:
+    ; 0: Empty - clear sky
+    .byte 0, 0, 0,    0, 0, 0
+    ; 1: Single high (A)
+    .byte 5, 0, 2,    0, 0, 0
+    ; 2: Single low (B)
+    .byte 22, 0, 7,   0, 0, 0
+    ; 3: Double mid (A)
+    .byte 4, 1, 5,    0, 0, 0
+    ; 4: Triple high (B)
+    .byte 20, 2, 3,   0, 0, 0
+    ; 5: Single + Single (different heights)
+    .byte 6, 0, 3,    24, 0, 6
+    ; 6: Single + Double
+    .byte 7, 0, 4,    20, 1, 6
+    ; 7: Double + Single
+    .byte 4, 1, 3,    25, 0, 7
+    ; 8: Triple + Single
+    .byte 4, 2, 4,    25, 0, 2
+    ; 9: Single + Triple
+    .byte 8, 0, 2,    20, 2, 5
+    ; 10: Double + Double
+    .byte 5, 1, 3,    21, 1, 6
+    ; 11: Single low (A) - variation
+    .byte 6, 0, 6,    0, 0, 0
+    ; 12: Single high (B) - variation
+    .byte 23, 0, 2,   0, 0, 0
+    ; 13: Double (B)
+    .byte 21, 1, 4,   0, 0, 0
+    ; 14: Triple (A)
+    .byte 4, 2, 5,    0, 0, 0
+    ; 15: Single + Single (both high)
+    .byte 5, 0, 2,    23, 0, 3
+
+;---------------------------------------
+; Draw clouds from random pattern
+; Input: nt_base = $20 (NT0) or $24 (NT1)
+;---------------------------------------
+draw_random_clouds:
+    ; Pick random pattern (0-15)
+    jsr rand_lfsr
+    lda rng_hi            ; Use high byte (more entropy)
+    and #$0F              ; 0-15
+
+    ; Calculate pattern offset (pattern * 6)
+    sta cloud_temp
+    asl a                 ; *2
+    clc
+    adc cloud_temp        ; *3
+    asl a                 ; *6
+    tax                   ; X = pattern offset
+
+    ; Draw cloud 1 (if col != 0)
+    lda cloud_patterns, x
+    beq @skip_cloud1      ; col=0 means no cloud
+    sta cloud_col
+    lda cloud_patterns+1, x
+    sta cloud_size
+    lda cloud_patterns+2, x
+    sta cloud_row
+    txa
+    pha                   ; Save pattern offset
+    jsr draw_one_cloud
+    pla
+    tax                   ; Restore pattern offset
+
+@skip_cloud1:
+    ; Draw cloud 2 (if col != 0)
+    lda cloud_patterns+3, x
+    beq @done             ; col=0 means no cloud
+    sta cloud_col
+    lda cloud_patterns+4, x
+    sta cloud_size
+    lda cloud_patterns+5, x
+    sta cloud_row
+    jsr draw_one_cloud
+
+@done:
+    rts
+
+;---------------------------------------
+; Draw one cloud at cloud_col, cloud_row
+; Uses cloud_size for width
+;---------------------------------------
+draw_one_cloud:
+    ; Row 0: top bumps ($00 $3A $3B ... $00)
+    lda cloud_row
+    ldx cloud_col
+    jsr set_cloud_ppu_addr
+    jsr write_cloud_row0
+
+    ; Row 1: middle body ($3C $3D ... $3E)
+    lda cloud_row
+    clc
+    adc #1
+    ldx cloud_col
+    jsr set_cloud_ppu_addr
+    jsr write_cloud_row1
+
+    ; Row 2: bottom ($3F $40 $41 ... $42)
+    lda cloud_row
+    clc
+    adc #2
+    ldx cloud_col
+    jsr set_cloud_ppu_addr
+    jsr write_cloud_row2
+
+    rts
+
+;---------------------------------------
+; Set PPU address for cloud drawing
+; A = row, X = column
+;---------------------------------------
+set_cloud_ppu_addr:
+    pha                   ; Save row
+    lsr a
+    lsr a
+    lsr a                 ; row / 8
+    clc
+    adc nt_base
+    sta PPU_ADDR          ; High byte
+
+    pla
+    and #$07
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; (row & 7) * 32
+    stx cloud_temp
+    clc
+    adc cloud_temp        ; + column
+    sta PPU_ADDR          ; Low byte
+    rts
+
+;---------------------------------------
+; Write cloud row 0 (top bumps)
+; Pattern: $00, ($3A $3B)..., $00
+;---------------------------------------
+write_cloud_row0:
+    lda #$00
+    sta PPU_DATA          ; Left edge
+
+    ldx cloud_size
+    lda cloud_widths, x
+    sec
+    sbc #2                ; Width minus 2 edges
+    lsr a                 ; Divide by 2 for bump pairs
+    sta cloud_temp        ; Number of bump pairs
+
+@bump_loop:
+    lda #CLOUD_TILE_BASE
+    sta PPU_DATA
+    lda #(CLOUD_TILE_BASE + 1)
+    sta PPU_DATA
+    dec cloud_temp
+    bne @bump_loop
+
+    lda #$00
+    sta PPU_DATA          ; Right edge
+    rts
+
+;---------------------------------------
+; Write cloud row 1 (middle body)
+; Pattern: $3C, $3D..., $3E
+;---------------------------------------
+write_cloud_row1:
+    lda #(CLOUD_TILE_BASE + 2)
+    sta PPU_DATA          ; Left edge
+
+    ldx cloud_size
+    lda cloud_widths, x
+    sec
+    sbc #2                ; Width minus 2 edges
+    sta cloud_temp        ; Middle tiles count
+
+@mid_loop:
+    lda #(CLOUD_TILE_BASE + 3)
+    sta PPU_DATA
+    dec cloud_temp
+    bne @mid_loop
+
+    lda #(CLOUD_TILE_BASE + 4)
+    sta PPU_DATA          ; Right edge
+    rts
+
+;---------------------------------------
+; Write cloud row 2 (bottom)
+; Pattern: $3F, ($40 $41)..., $42
+;---------------------------------------
+write_cloud_row2:
+    lda #(CLOUD_TILE_BASE + 5)
+    sta PPU_DATA          ; Left edge
+
+    ldx cloud_size
+    lda cloud_widths, x
+    sec
+    sbc #2                ; Width minus 2 edges
+    lsr a                 ; Divide by 2 for pairs
+    sta cloud_temp
+
+@bot_loop:
+    lda #(CLOUD_TILE_BASE + 6)
+    sta PPU_DATA
+    lda #(CLOUD_TILE_BASE + 7)
+    sta PPU_DATA
+    dec cloud_temp
+    bne @bot_loop
+
+    lda #(CLOUD_TILE_BASE + 8)
+    sta PPU_DATA          ; Right edge
+    rts
+
+;---------------------------------------
+; Clear cloud zone A (cols 4-11, rows 2-10)
+; Writes $00 to all tiles in the zone
+;---------------------------------------
+clear_cloud_zone_a:
+    lda #CLOUD_ZONE_A     ; Column 4
+    sta cloud_col
+    jmp clear_cloud_zone
+
+;---------------------------------------
+; Clear cloud zone B (cols 20-27, rows 2-10)
+; Writes $00 to all tiles in the zone
+;---------------------------------------
+clear_cloud_zone_b:
+    lda #CLOUD_ZONE_B     ; Column 20
+    sta cloud_col
+    ; Fall through to clear_cloud_zone
+
+;---------------------------------------
+; Clear 8 columns x 9 rows starting at cloud_col
+; Rows 2-10 (CLOUD_ROW_MIN to CLOUD_ROW_MAX+2)
+;---------------------------------------
+clear_cloud_zone:
+    lda #CLOUD_ROW_MIN    ; Start at row 2
+    sta cloud_row
+
+@clear_row:
+    ; Set PPU address for this row
+    lda cloud_row
+    ldx cloud_col
+    jsr set_cloud_ppu_addr
+
+    ; Write 8 empty tiles
+    lda #$00
+    ldx #8
+@clear_tile:
+    sta PPU_DATA
+    dex
+    bne @clear_tile
+
+    ; Next row
+    inc cloud_row
+    lda cloud_row
+    cmp #(CLOUD_ROW_MAX + 3)  ; Rows 2-10 (cloud can be 3 rows tall starting at row 8)
+    bcc @clear_row
+
     rts
 
 ;===============================================================================

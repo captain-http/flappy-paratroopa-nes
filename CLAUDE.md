@@ -132,6 +132,51 @@ Uses NES APU channels for sound effects:
 - `SQ2_VOL`, `SQ2_LO`, `SQ2_HI` - Coin/score sound
 - `NOISE_VOL`, `NOISE_LO`, `NOISE_HI` - Crash and ground hit
 
+## Cloud System
+
+SMB-style clouds using pattern-based randomization. Clouds regenerate each time a nametable wraps.
+
+### Cloud Tiles (Background Pattern Table $1000)
+
+| Tile | Description |
+|------|-------------|
+| $3A-$3B | Top bumps |
+| $3C-$3E | Middle body (left edge, fill, right edge) |
+| $3F-$42 | Bottom (left edge, fill pair, right edge) |
+
+### Cloud Sizes
+
+| Size | Width | Tiles |
+|------|-------|-------|
+| Single | 4 tiles | 1 bump pair |
+| Double | 6 tiles | 2 bump pairs |
+| Triple | 8 tiles | 3 bump pairs |
+
+### Cloud Patterns
+
+16 curated patterns randomly selected per nametable:
+- Empty (no clouds)
+- Single/Double/Triple alone (various positions)
+- Two-cloud combinations (Single+Single, Single+Double, etc.)
+
+### Cloud Zones (safe columns avoiding pipes)
+
+| Zone | Columns | Description |
+|------|---------|-------------|
+| Zone A | 4-11 | Left side, before pipe 0 |
+| Zone B | 20-27 | Right side, after pipe 0 |
+
+### Palette 3 (Clouds)
+
+| Index | Value | Color |
+|-------|-------|-------|
+| 0 | $22 | Sky blue (transparent) |
+| 1 | $30 | White (cloud body) |
+| 2 | $21 | Cyan (shading) |
+| 3 | $0F | Black (outline) |
+
+Sky area (attr rows 0-5) prefilled with palette 3 at init. Title text tiles should use palette 3 colors.
+
 ## Agents
 
 Use these agents for NES development tasks:
