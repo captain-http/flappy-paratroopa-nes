@@ -156,11 +156,18 @@ reset:
     sta bird_vel_lo
     sta bird_vel_hi
 
-    ; Initialize LFSR with non-zero seed
+    ; Initialize LFSR only if both bytes are zero (prevents same sequence after reset)
+    ; On fresh boot, RAM is unpredictable (usually non-zero = fine for LFSR)
+    ; After playing, LFSR will be non-zero - preserve it for randomness
+    lda rng_lo
+    ora rng_hi
+    bne @skip_rng_seed
+    ; Both zero - seed with non-zero value
     lda #$01
     sta rng_lo
-    lda #$A5              ; Arbitrary non-zero seed
+    lda #$A5
     sta rng_hi
+@skip_rng_seed:
 
     ; Initialize pipe gaps
     ; NT0 starts empty - flag prevents collision checks until drawn

@@ -400,6 +400,21 @@ rand_lfsr:
 - LFSR runs every frame during STATE_WAITING
 - Player's timing to press start determines initial LFSR state
 - Each game has different random sequence based on wait time
+- RNG state preserved across game resets (not re-seeded after dying)
+
+**Seed Logic:**
+```asm
+; Only seed if both bytes are zero (unlikely on fresh boot)
+; Preserves RNG state after game over for different subsequent games
+lda rng_lo
+ora rng_hi
+bne @skip_rng_seed
+lda #$01
+sta rng_lo
+lda #$A5
+sta rng_hi
+@skip_rng_seed:
+```
 
 **Cycle Cost:** ~50 cycles per call (negligible for vblank)
 
