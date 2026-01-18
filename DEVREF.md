@@ -167,32 +167,38 @@ Spacing: 384 - 256 = 128 pixels
 
 **Key insight:** Redraw the nametable that just went OFF-screen, not the one becoming visible. This ensures pipes are ready before the nametable scrolls back into view (~2.1 seconds at 2px/frame).
 
-**Eleven-Frame Redraw (Pipes + Clouds):**
+**Thirteen-Frame Redraw (Pipes + Clouds):**
 
-Drawing a full pipe column requires ~2400 cycles (26 rows × ~92 cycles/row), which exceeds vblank. The gap position also varies, making top-half row count variable (4-23 rows). Solution: split each pipe into 4 parts, plus 3 frames for cloud regeneration.
+Drawing a full pipe column requires ~2400 cycles (26 rows × ~92 cycles/row), which exceeds vblank. The gap position also varies, making top-half row count variable (4-23 rows). Solution: split each pipe into 4 parts, plus 5 frames for cloud regeneration (13 total).
 
 ```
-Frame 0:  pipe 0 body+cap   → set pipe_redraw=1
-Frame 1:  pipe 0 gap clear  → set pipe_redraw=2
-Frame 2:  pipe 0 bottom     → set pipe_redraw=3
-Frame 3:  pipe 0 attrs      → set pipe_redraw=4, next_pipe_gap
-Frame 4:  pipe 1 body+cap   → set pipe_redraw=5
-Frame 5:  pipe 1 gap clear  → set pipe_redraw=6
-Frame 6:  pipe 1 bottom     → set pipe_redraw=7
-Frame 7:  pipe 1 attrs      → set pipe_redraw=8, next_pipe_gap
-Frame 8:  clear cloud zone A → set pipe_redraw=9
-Frame 9:  clear cloud zone B → set pipe_redraw=10
-Frame 10: draw random clouds → set pipe_redraw=$FF
+Frame 0:  pipe 0 body+cap        → set pipe_redraw=1
+Frame 1:  pipe 0 gap clear       → set pipe_redraw=2
+Frame 2:  pipe 0 bottom          → set pipe_redraw=3
+Frame 3:  pipe 0 attrs           → set pipe_redraw=4, next_pipe_gap
+Frame 4:  pipe 1 body+cap        → set pipe_redraw=5
+Frame 5:  pipe 1 gap clear       → set pipe_redraw=6
+Frame 6:  pipe 1 bottom          → set pipe_redraw=7
+Frame 7:  pipe 1 attrs           → set pipe_redraw=8, next_pipe_gap
+Frame 8:  clear cloud zone A top → set pipe_redraw=9
+Frame 9:  clear cloud zone A bot → set pipe_redraw=10
+Frame 10: clear cloud zone B top → set pipe_redraw=11
+Frame 11: clear cloud zone B bot → set pipe_redraw=12
+Frame 12: draw random clouds     → set pipe_redraw=$FF
 ```
 
-| Frame | What | Max Rows | Max Cycles |
-|-------|------|----------|------------|
-| 0, 4 | Body + cap | 15 | ~1275 |
-| 1, 5 | Gap clear | 8 | ~680 |
-| 2, 6 | Bottom (cap + body) | 14 | ~1190 |
+| Frame | What | Tiles/Bytes | Max Cycles |
+|-------|------|-------------|------------|
+| 0, 4 | Body + cap | ~15 rows | ~1275 |
+| 1, 5 | Gap clear | 8 rows | ~680 |
+| 2, 6 | Bottom (cap + body) | ~14 rows | ~1190 |
 | 3, 7 | Attributes | 7 bytes | ~170 |
+| 8, 10 | Cloud zone top half | 32 tiles | ~400 |
+| 9, 11 | Cloud zone bottom half | 40 tiles | ~500 |
+| 12 | Draw clouds | Variable | ~300-600 |
 
 All frames fit comfortably within the ~1700 cycle budget (after OAM DMA + overhead).
+Cloud clearing was split from 72 tiles/frame to 32-40 tiles/frame to prevent vblank overruns.
 
 **Gap Clearing:**
 
@@ -742,17 +748,19 @@ At init, entire sky area (attr rows 0-5) is set to palette 3 ($FF = all quadrant
 
 Clouds regenerate when nametables wrap, integrated into pipe redraw state machine:
 ```
-Frame 0-7:  Pipe drawing (existing)
-Frame 8:    Clear cloud zone A (8 cols × 9 rows)
-Frame 9:    Clear cloud zone B (8 cols × 9 rows)
-Frame 10:   Draw new random cloud pattern
-Frame 11:   Done ($FF)
+Frame 0-7:   Pipe drawing (existing)
+Frame 8:     Clear cloud zone A top half (rows 2-5)
+Frame 9:     Clear cloud zone A bottom half (rows 6-10)
+Frame 10:    Clear cloud zone B top half (rows 2-5)
+Frame 11:    Clear cloud zone B bottom half (rows 6-10)
+Frame 12:    Draw new random cloud pattern
+Frame 13:    Done ($FF)
 ```
 
 **Clearing Algorithm:**
 - Write $00 (empty tile) to columns 4-11 and 20-27
 - Rows 2-10 (CLOUD_ROW_MIN to CLOUD_ROW_MAX+2)
-- 72 tiles per zone, split across 2 frames
+- Split into 4 frames (32-40 tiles each) to fit in vblank
 
 **Pattern Selection:**
 ```asm

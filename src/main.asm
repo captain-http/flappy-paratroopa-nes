@@ -1563,22 +1563,32 @@ draw_pipes_in_nt:
     ; pipe_redraw = 5: draw pipe 1 gap clear, set to 6
     ; pipe_redraw = 6: draw pipe 1 bottom, set to 7
     ; pipe_redraw = 7: draw pipe 1 attrs, set to 8
-    ; pipe_redraw = 8: clear cloud zone A, set to 9
-    ; pipe_redraw = 9: clear cloud zone B, set to 10
-    ; pipe_redraw = 10: draw new clouds, set to $FF (done)
+    ; pipe_redraw = 8: clear cloud zone A (top half), set to 9
+    ; pipe_redraw = 9: clear cloud zone A (bottom half), set to 10
+    ; pipe_redraw = 10: clear cloud zone B (top half), set to 11
+    ; pipe_redraw = 11: clear cloud zone B (bottom half), set to 12
+    ; pipe_redraw = 12: draw new clouds, set to $FF (done)
     ; pipe_redraw = $FF: skip (checked by NMI before calling)
     ; Caller must set nt_base before queuing redraw
 
     bit PPU_STATUS        ; Reset PPU latch
 
     lda pipe_redraw
-    beq @frame0
+    bne @not0
+    jmp @frame0
+@not0:
     cmp #1
-    beq @frame1
+    bne @not1
+    jmp @frame1
+@not1:
     cmp #2
-    beq @frame2
+    bne @not2
+    jmp @frame2
+@not2:
     cmp #3
-    beq @frame3
+    bne @not3
+    jmp @frame3
+@not3:
     cmp #4
     bne @not4
     jmp @frame4
@@ -1600,26 +1610,48 @@ draw_pipes_in_nt:
     jmp @frame8
 @not8:
     cmp #9
-    bne @frame10
+    bne @not9
     jmp @frame9
+@not9:
+    cmp #10
+    bne @not10
+    jmp @frame10
+@not10:
+    cmp #11
+    bne @frame12
+    jmp @frame11
 
-@frame10:
-    ; Frame 11: Draw new random clouds
+@frame12:
+    ; Frame 13: Draw new random clouds
     jsr draw_random_clouds
     lda #$FF
     sta pipe_redraw       ; Done
     rts
 
+@frame11:
+    ; Frame 12: Clear cloud zone B bottom half (rows 6-10)
+    jsr clear_cloud_zone_b_bottom
+    lda #12
+    sta pipe_redraw
+    rts
+
+@frame10:
+    ; Frame 11: Clear cloud zone B top half (rows 2-5)
+    jsr clear_cloud_zone_b_top
+    lda #11
+    sta pipe_redraw
+    rts
+
 @frame9:
-    ; Frame 10: Clear cloud zone B (cols 20-27, rows 2-10)
-    jsr clear_cloud_zone_b
+    ; Frame 10: Clear cloud zone A bottom half (rows 6-10)
+    jsr clear_cloud_zone_a_bottom
     lda #10
     sta pipe_redraw
     rts
 
 @frame8:
-    ; Frame 9: Clear cloud zone A (cols 4-11, rows 2-10)
-    jsr clear_cloud_zone_a
+    ; Frame 9: Clear cloud zone A top half (rows 2-5)
+    jsr clear_cloud_zone_a_top
     lda #9
     sta pipe_redraw
     rts
@@ -2273,30 +2305,57 @@ write_cloud_row2:
     rts
 
 ;---------------------------------------
-; Clear cloud zone A (cols 4-11, rows 2-10)
-; Writes $00 to all tiles in the zone
+; Clear cloud zone A top half (cols 4-11, rows 2-5)
+; Split to fit in vblank - 4 rows x 8 tiles = 32 tiles
 ;---------------------------------------
-clear_cloud_zone_a:
+clear_cloud_zone_a_top:
     lda #CLOUD_ZONE_A     ; Column 4
     sta cloud_col
-    jmp clear_cloud_zone
+    lda #CLOUD_ROW_MIN    ; Row 2
+    ldy #6                ; End before row 6
+    jmp clear_cloud_zone_partial
 
 ;---------------------------------------
-; Clear cloud zone B (cols 20-27, rows 2-10)
-; Writes $00 to all tiles in the zone
+; Clear cloud zone A bottom half (cols 4-11, rows 6-10)
+; Split to fit in vblank - 5 rows x 8 tiles = 40 tiles
 ;---------------------------------------
-clear_cloud_zone_b:
+clear_cloud_zone_a_bottom:
+    lda #CLOUD_ZONE_A     ; Column 4
+    sta cloud_col
+    lda #6                ; Row 6
+    ldy #(CLOUD_ROW_MAX + 3)  ; End at row 11
+    jmp clear_cloud_zone_partial
+
+;---------------------------------------
+; Clear cloud zone B top half (cols 20-27, rows 2-5)
+; Split to fit in vblank - 4 rows x 8 tiles = 32 tiles
+;---------------------------------------
+clear_cloud_zone_b_top:
     lda #CLOUD_ZONE_B     ; Column 20
     sta cloud_col
-    ; Fall through to clear_cloud_zone
+    lda #CLOUD_ROW_MIN    ; Row 2
+    ldy #6                ; End before row 6
+    jmp clear_cloud_zone_partial
 
 ;---------------------------------------
-; Clear 8 columns x 9 rows starting at cloud_col
-; Rows 2-10 (CLOUD_ROW_MIN to CLOUD_ROW_MAX+2)
+; Clear cloud zone B bottom half (cols 20-27, rows 6-10)
+; Split to fit in vblank - 5 rows x 8 tiles = 40 tiles
 ;---------------------------------------
-clear_cloud_zone:
-    lda #CLOUD_ROW_MIN    ; Start at row 2
+clear_cloud_zone_b_bottom:
+    lda #CLOUD_ZONE_B     ; Column 20
+    sta cloud_col
+    lda #6                ; Row 6
+    ldy #(CLOUD_ROW_MAX + 3)  ; End at row 11
+    ; Fall through to clear_cloud_zone_partial
+
+;---------------------------------------
+; Clear partial cloud zone
+; A = start row, Y = end row (exclusive)
+; cloud_col must be set before calling
+;---------------------------------------
+clear_cloud_zone_partial:
     sta cloud_row
+    sty cloud_temp        ; Store end row
 
 @clear_row:
     ; Set PPU address for this row
@@ -2315,7 +2374,7 @@ clear_cloud_zone:
     ; Next row
     inc cloud_row
     lda cloud_row
-    cmp #(CLOUD_ROW_MAX + 3)  ; Rows 2-10 (cloud can be 3 rows tall starting at row 8)
+    cmp cloud_temp        ; Compare to end row
     bcc @clear_row
 
     rts
