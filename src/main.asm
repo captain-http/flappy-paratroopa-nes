@@ -1013,11 +1013,12 @@ check_pipe_collision:
 
 @check_y:
     ; A = gap row for the overlapping pipe
-    ; Rectangle collision: bird (56,bird_y)-(72,bird_y+16) vs pipes
+    ; Rectangle collision: bird (56,bird_y)-(72,bird_y+24) vs pipes
+    ; Bird is 2x3 tiles = 16x24 pixels
     ; Top pipe: Y from 0 to gap_top_y
     ; Bottom pipe: Y from gap_top_y+64 to ground
     ;
-    ; Bird safe if: bird_y >= gap_top_y AND bird_y+16 <= gap_top_y+64
+    ; Bird safe if: bird_y >= gap_top_y AND bird_y+24 <= gap_top_y+64
 
     ; Calculate gap_top_y = gap * 8
     asl a
@@ -1030,13 +1031,13 @@ check_pipe_collision:
     cmp pipe0_drawn_gap   ; compare bird_y with gap_top_y
     bcc @collision        ; bird_y < gap_top_y, hit top pipe
 
-    ; Check bottom pipe: bird_y+16 > gap_top_y+64 means bird bottom is in bottom pipe
-    ; Equivalent: bird_y > gap_top_y+48
+    ; Check bottom pipe: bird_y+24 > gap_top_y+64 means bird bottom is in bottom pipe
+    ; Equivalent: bird_y > gap_top_y+40
     lda pipe0_drawn_gap
     clc
     adc #(GAP_ROWS * 8)   ; A = gap_top_y + 64 (gap bottom / bottom pipe top)
     sec
-    sbc #16               ; A = gap_top_y + 48 (max safe bird_y)
+    sbc #24               ; A = gap_top_y + 40 (max safe bird_y for 24px bird)
     cmp bird_y            ; compare threshold with bird_y
     bcc @collision        ; threshold < bird_y, bird bottom in pipe
 
