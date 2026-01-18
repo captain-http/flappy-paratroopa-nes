@@ -17,7 +17,7 @@ scroll_x    = $08       ; X scroll position (0-255)
 scroll_nt   = $09       ; Nametable select (0 or 1)
 
 ; Game state
-game_state  = $0A       ; 0 = waiting, 1 = playing, 2 = dying, 3 = dead
+game_state  = $0A       ; Current game state (see STATE_* constants)
 
 ; Pipe redraw variables
 pipe_redraw = $0B       ; Nametable to redraw pipes in (0, 1, or $FF=none)
@@ -59,8 +59,30 @@ SCORE_X_ONES     = 128  ; X position of ones digit
 sound_timer     = $1D   ; Frames until next sound state
 sound_state     = $1E   ; 0=idle, 1=coin B5, 2=coin E6
 
+; Title text
+clear_title     = $1F   ; Set to 1 to clear title text in NMI
+
+; Death sequence variables
+bird_x          = $20   ; Bird X position (for walk-off)
+fade_timer      = $21   ; Frames until next fade step
+fade_step       = $22   ; Current fade level (0=normal, 4=black)
+update_palette  = $23   ; Flag to update palette in NMI
+
 ; Shell sprite (death animation)
 SHELL_TILE_BASE = $1A   ; 2x2 shell tiles at $1A-$1D
+SHELL_FEET_BASE = $2A   ; Shell with feet showing at $2A-$2B
+STUN_ANIM_SPEED = 10    ; Frames between stunned animation updates
+
+; Walking sprite (no wings)
+WALK_TILE_BASE  = $1E   ; 2x3 walk frame 1 at $1E-$23
+WALK_TILE_BASE2 = $24   ; 2x3 walk frame 2 at $24-$29
+WALK_ANIM_SPEED = 8     ; Frames between walk animation updates
+
+; Fade timing
+FADE_DELAY      = 15    ; Frames per fade step
+
+; Alphabet tiles (background pattern table)
+ALPHA_TILE_BASE = $20   ; A=$20, B=$21, ... Z=$39
 
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row
@@ -69,10 +91,15 @@ GAP_MIN     = 4         ; Minimum gap row
 GAP_MAX     = 15        ; Maximum gap row
 
 ; Game state constants
-STATE_WAITING = 0       ; Waiting for player to press A/B
-STATE_PLAYING = 1
-STATE_DYING   = 2
-STATE_DEAD    = 3
+STATE_WAITING  = 0      ; Waiting for player to press A/B
+STATE_PLAYING  = 1      ; Active gameplay
+STATE_DYING    = 2      ; Shell falling after collision
+STATE_STUNNED  = 3      ; Recovering after hitting ground
+STATE_WALK_OFF = 4      ; Walking left off screen
+STATE_FADE_OUT = 5      ; Fading to black, then full reset
+
+; Stun timing
+STUN_DELAY     = 45     ; Frames to wait before walking (~0.75 sec)
 
 ; Pipe collision constants (based on scroll position)
 ; Both pipes in NT1 (initial screen is empty)

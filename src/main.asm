@@ -75,13 +75,15 @@ reset:
     lda #$00
     sta PPU_ADDR          ; PPU address = $3F00
 
-    ; Background palette 0 (sky)
+    ; Background palette 0 (sky + text)
     lda #$22              ; SMB sky blue (universal bg)
     sta PPU_DATA
     lda #$22              ; Color 1 (unused)
     sta PPU_DATA
-    sta PPU_DATA          ; Color 2 (unused)
-    sta PPU_DATA          ; Color 3 (unused)
+    lda #$30              ; Color 2 - white (for text)
+    sta PPU_DATA
+    lda #$22              ; Color 3 (unused)
+    sta PPU_DATA
 
     ; Background palette 1 (ground)
     lda #$22              ; Color 0 (mirrors to universal bg)
@@ -131,6 +133,9 @@ reset:
     bne @clear_nametables
     dey
     bne @clear_nametables
+
+    ; Draw "PRESS A OR B" title text in NT0
+    jsr draw_title_text
 
     ; Initialize bird state (8.8 fixed-point)
     lda #0
@@ -398,10 +403,18 @@ game_loop:
 
     ; Check game state
     lda game_state
-    cmp #STATE_DEAD
-    bne @not_dead
-    jmp @dead_state           ; Fully frozen
-@not_dead:
+    cmp #STATE_FADE_OUT
+    bne @not_fade_out
+    jmp @fade_out_state
+@not_fade_out:
+    cmp #STATE_WALK_OFF
+    bne @not_walk_off
+    jmp @walk_off_state
+@not_walk_off:
+    cmp #STATE_STUNNED
+    bne @not_stunned
+    jmp @stunned_state
+@not_stunned:
     cmp #STATE_DYING
     bne @not_dying
     jmp @dying_state          ; Falling, no input
@@ -474,32 +487,34 @@ game_loop:
     jmp @clamp_ceiling    ; Wrapped, clamp to ceiling
 
 @check_ground:
-    ; Check ground collision - bird is now dead
+    ; Check ground collision - bird hit ground directly
     lda bird_y
     cmp #GROUND_Y
     bcc @no_ground        ; bird_y < GROUND_Y, no collision
-    ; Bird hit ground - dead!
+    ; Bird hit ground - start stunned state
     lda #GROUND_Y         ; Clamp to ground
     sta bird_y
     lda #0                ; Stop falling
     sta bird_vel_lo
     sta bird_vel_hi
     sta bird_y_frac
-    lda #STATE_DEAD       ; Fully dead
+    lda #STATE_STUNNED
     sta game_state
-    jsr switch_to_shell
-    ; Update shell Y positions before freezing
+    lda #STUN_DELAY
+    sta fade_timer        ; Reuse fade_timer for stun delay
+    jsr switch_to_shell   ; Show shell while stunned
+    jsr play_ground_hit   ; Just noise burst (no whistle)
+    ; Update shell Y positions (same as dying state)
     lda bird_y
     clc
     adc #8
-    sta OAM_BUFFER+8      ; Mid-left
+    sta OAM_BUFFER+8      ; Mid-left (shell top)
     sta OAM_BUFFER+12     ; Mid-right
     clc
     adc #8
-    sta OAM_BUFFER+16     ; Bottom-left
+    sta OAM_BUFFER+16     ; Bottom-left (shell bottom)
     sta OAM_BUFFER+20     ; Bottom-right
-    jsr play_ground_hit   ; Just noise burst (no whistle)
-    jmp @dead_state       ; Skip animation update
+    jmp game_loop
 @no_ground:
 
     ; Update sprite Y positions (2x3 bird)
@@ -609,8 +624,10 @@ game_loop:
     sta bird_vel_lo
     sta bird_vel_hi
     sta bird_y_frac
-    lda #STATE_DEAD
+    lda #STATE_STUNNED
     sta game_state
+    lda #STUN_DELAY
+    sta fade_timer        ; Reuse fade_timer for stun delay
 @dying_no_ground:
 
     ; Update shell sprite Y positions (2x2, skip hidden top sprites)
@@ -626,8 +643,123 @@ game_loop:
 
     jmp game_loop
 
-@dead_state:
-    ; Bird is dead - fully frozen, wait for reset
+@stunned_state:
+    ; Koopa is stunned on ground, waiting to recover
+    dec fade_timer
+    bne @stunned_animate
+    ; Stun timer expired - start walking
+    lda #STATE_WALK_OFF
+    sta game_state
+    ; Initialize for walk off
+    lda #56
+    sta bird_x
+    lda #0
+    sta anim_timer
+    sta anim_frame
+    jsr switch_to_walking
+    jmp game_loop
+
+@stunned_animate:
+    ; Animate feet peeking out of shell
+    inc anim_timer
+    lda anim_timer
+    cmp #STUN_ANIM_SPEED
+    bcc @stunned_done
+    lda #0
+    sta anim_timer
+    ; Toggle anim_frame between 0 and 1
+    lda anim_frame
+    eor #1
+    sta anim_frame
+    beq @shell_no_feet
+    ; Show feet (tiles $2A, $2B)
+    lda #SHELL_FEET_BASE
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    lda #(SHELL_FEET_BASE + 1)
+    sta OAM_BUFFER+21     ; Bottom-right tile
+    jmp game_loop
+@shell_no_feet:
+    ; Hide feet (tiles $1C, $1D)
+    lda #(SHELL_TILE_BASE + 2)
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    lda #(SHELL_TILE_BASE + 3)
+    sta OAM_BUFFER+21     ; Bottom-right tile
+@stunned_done:
+    jmp game_loop
+
+@walk_off_state:
+    ; Koopa walks left off screen
+    ; Decrement X position
+    dec bird_x
+    lda bird_x
+    cmp #$F0              ; Fully off screen? (X = -16, right edge at 0)
+    bne @walk_update_sprites
+    ; Off screen - start fade out
+    lda #STATE_FADE_OUT
+    sta game_state
+    lda #FADE_DELAY
+    sta fade_timer
+    lda #0
+    sta fade_step
+    jmp game_loop
+
+@walk_update_sprites:
+    ; Update walk animation
+    inc anim_timer
+    lda anim_timer
+    cmp #WALK_ANIM_SPEED
+    bcc @walk_no_anim
+    lda #0
+    sta anim_timer
+    ; Toggle frame between 0 and 6
+    lda anim_frame
+    eor #6
+    sta anim_frame
+    ; Update sprite tiles
+    jsr update_walk_tiles
+@walk_no_anim:
+    ; Update sprite X positions
+    ; Check if bird_x wrapped (high bit set = off left edge)
+    lda bird_x
+    bmi @hide_sprites     ; If negative (>=128), hide sprites
+    sta OAM_BUFFER+3      ; Top-left X
+    sta OAM_BUFFER+11     ; Mid-left X
+    sta OAM_BUFFER+19     ; Bottom-left X
+    clc
+    adc #8
+    sta OAM_BUFFER+7      ; Top-right X
+    sta OAM_BUFFER+15     ; Mid-right X
+    sta OAM_BUFFER+23     ; Bottom-right X
+    jmp game_loop
+
+@hide_sprites:
+    ; Hide all 6 sprites by setting Y to $FF
+    lda #$FF
+    sta OAM_BUFFER+0
+    sta OAM_BUFFER+4
+    sta OAM_BUFFER+8
+    sta OAM_BUFFER+12
+    sta OAM_BUFFER+16
+    sta OAM_BUFFER+20
+    jmp game_loop
+
+@fade_out_state:
+    ; Fade palette to black
+    dec fade_timer
+    bne @fade_out_done
+    ; Timer expired - next fade step
+    lda #FADE_DELAY
+    sta fade_timer
+    inc fade_step
+    lda fade_step
+    cmp #5                ; 5 steps: 0,1,2,3,4 (4 = fully black)
+    bcc @fade_out_apply
+    ; Fully faded to black - do a full reset
+    jmp reset
+@fade_out_apply:
+    lda #1
+    sta update_palette    ; Flag to update palette in NMI
+@fade_out_done:
     jmp game_loop
 
 @waiting_state:
@@ -640,6 +772,8 @@ game_loop:
     beq @waiting_done
     lda #STATE_PLAYING
     sta game_state
+    lda #1
+    sta clear_title       ; Queue title clear for next NMI
 @waiting_done:
     jmp game_loop
 
@@ -664,6 +798,22 @@ nmi:
     beq @no_pipe_redraw
     jsr draw_pipes_in_nt
 @no_pipe_redraw:
+
+    ; Check if we need to clear title text
+    lda clear_title
+    beq @no_clear_title
+    jsr clear_title_text
+    lda #0
+    sta clear_title
+@no_clear_title:
+
+    ; Check if we need to update palette (fade effect)
+    lda update_palette
+    beq @no_palette_update
+    jsr apply_fade_palette
+    lda #0
+    sta update_palette
+@no_palette_update:
 
     ; Set scroll position
     bit PPU_STATUS        ; Reset PPU latch
@@ -1075,6 +1225,111 @@ update_sound:
     rts
 
 ;===============================================================================
+; Palette Fade Effect
+;===============================================================================
+apply_fade_palette:
+    ; Apply fade based on fade_step (0=normal, 4=black)
+    ; Write all 32 palette entries with faded colors
+    bit PPU_STATUS
+    lda #$3F
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR          ; PPU address = $3F00
+
+    ; Calculate fade offset: fade_step * 16 (16 colors per fade level)
+    lda fade_step
+    asl a
+    asl a
+    asl a
+    asl a                 ; A = fade_step * 16
+    tax                   ; X = offset into fade table
+
+    ; Write 16 background palette colors
+    ldy #16
+@write_bg_palette:
+    lda fade_palette_bg, x
+    sta PPU_DATA
+    inx
+    dey
+    bne @write_bg_palette
+
+    ; Sprite palette starts at same offset
+    lda fade_step
+    asl a
+    asl a
+    asl a
+    asl a
+    tax
+
+    ; Write 16 sprite palette colors
+    ldy #16
+@write_spr_palette:
+    lda fade_palette_spr, x
+    sta PPU_DATA
+    inx
+    dey
+    bne @write_spr_palette
+
+    rts
+
+; Fade palette tables (5 levels: 0=normal, 4=black)
+; Background palettes (16 colors x 5 levels = 80 bytes)
+fade_palette_bg:
+    ; Level 0 (normal)
+    .byte $22, $22, $30, $22  ; Palette 0: sky + text
+    .byte $22, $36, $17, $0F  ; Palette 1: ground
+    .byte $22, $29, $1A, $0F  ; Palette 2: pipes
+    .byte $22, $22, $22, $22  ; Palette 3: unused
+    ; Level 1 (-$10)
+    .byte $12, $12, $20, $12
+    .byte $12, $26, $07, $0F
+    .byte $12, $19, $0A, $0F
+    .byte $12, $12, $12, $12
+    ; Level 2 (-$20)
+    .byte $02, $02, $10, $02
+    .byte $02, $16, $07, $0F
+    .byte $02, $09, $0A, $0F
+    .byte $02, $02, $02, $02
+    ; Level 3 (-$30)
+    .byte $0F, $0F, $00, $0F
+    .byte $0F, $06, $07, $0F
+    .byte $0F, $09, $0A, $0F
+    .byte $0F, $0F, $0F, $0F
+    ; Level 4 (black)
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+
+; Sprite palettes (16 colors x 5 levels = 80 bytes)
+fade_palette_spr:
+    ; Level 0 (normal)
+    .byte $22, $1A, $30, $27  ; Palette 0: Koopa
+    .byte $22, $22, $22, $22  ; Palette 1: unused
+    .byte $22, $22, $22, $22  ; Palette 2: unused
+    .byte $22, $22, $22, $22  ; Palette 3: unused
+    ; Level 1 (-$10)
+    .byte $12, $0A, $20, $17
+    .byte $12, $12, $12, $12
+    .byte $12, $12, $12, $12
+    .byte $12, $12, $12, $12
+    ; Level 2 (-$20)
+    .byte $02, $0A, $10, $07
+    .byte $02, $02, $02, $02
+    .byte $02, $02, $02, $02
+    .byte $02, $02, $02, $02
+    ; Level 3 (-$30)
+    .byte $0F, $0A, $00, $07
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+    ; Level 4 (black)
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+    .byte $0F, $0F, $0F, $0F
+
+;===============================================================================
 ; Switch to Shell Sprite (Death Animation)
 ;===============================================================================
 switch_to_shell:
@@ -1097,6 +1352,76 @@ switch_to_shell:
     rts
 
 ;===============================================================================
+; Switch to Walking Sprite (after landing)
+;===============================================================================
+switch_to_walking:
+    ; Restore all 6 sprites for 2x3 walking Koopa
+    ; Set Y positions (bird_y is at ground level)
+    lda bird_y
+    sta OAM_BUFFER+0      ; Top-left Y
+    sta OAM_BUFFER+4      ; Top-right Y
+    clc
+    adc #8
+    sta OAM_BUFFER+8      ; Mid-left Y
+    sta OAM_BUFFER+12     ; Mid-right Y
+    clc
+    adc #8
+    sta OAM_BUFFER+16     ; Bottom-left Y
+    sta OAM_BUFFER+20     ; Bottom-right Y
+
+    ; Set walking tiles (frame 1) - normal order
+    lda #WALK_TILE_BASE
+    sta OAM_BUFFER+1      ; Top-left tile
+    lda #(WALK_TILE_BASE + 1)
+    sta OAM_BUFFER+5      ; Top-right tile
+    lda #(WALK_TILE_BASE + 2)
+    sta OAM_BUFFER+9      ; Mid-left tile
+    lda #(WALK_TILE_BASE + 3)
+    sta OAM_BUFFER+13     ; Mid-right tile
+    lda #(WALK_TILE_BASE + 4)
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    lda #(WALK_TILE_BASE + 5)
+    sta OAM_BUFFER+21     ; Bottom-right tile
+
+    ; No flip - walking sprites already face left, or flip if they face right
+    ; If your walking tiles face right, uncomment the flip:
+    ; lda #$40              ; Horizontal flip bit
+    lda #$00              ; No flip (tiles face left)
+    sta OAM_BUFFER+2
+    sta OAM_BUFFER+6
+    sta OAM_BUFFER+10
+    sta OAM_BUFFER+14
+    sta OAM_BUFFER+18
+    sta OAM_BUFFER+22
+    rts
+
+;===============================================================================
+; Update Walking Tiles (animation)
+;===============================================================================
+update_walk_tiles:
+    ; anim_frame is 0 or 6, normal order
+    lda anim_frame
+    clc
+    adc #WALK_TILE_BASE
+    sta OAM_BUFFER+1      ; Top-left
+    clc
+    adc #1
+    sta OAM_BUFFER+5      ; Top-right
+    clc
+    adc #1
+    sta OAM_BUFFER+9      ; Mid-left
+    clc
+    adc #1
+    sta OAM_BUFFER+13     ; Mid-right
+    clc
+    adc #1
+    sta OAM_BUFFER+17     ; Bottom-left
+    clc
+    adc #1
+    sta OAM_BUFFER+21     ; Bottom-right
+    rts
+
+;===============================================================================
 ; Update Score Display Sprites
 ;===============================================================================
 update_score_display:
@@ -1115,6 +1440,64 @@ update_score_display:
     clc
     adc #DIGIT_TILE_BASE
     sta OAM_BUFFER+33     ; Ones digit tile
+    rts
+
+;===============================================================================
+; Title Text Drawing
+;===============================================================================
+draw_title_text:
+    ; Draw "PRESS A OR B" in front of bird
+    ; Row 14, column 10 = $21CA
+    ; Alphabet: A=$20, B=$21, ... Z=$39
+    ; P=$2F, R=$31, E=$24, S=$32, A=$20, O=$2E, B=$21
+    bit PPU_STATUS
+    lda #$21
+    sta PPU_ADDR
+    lda #$CA
+    sta PPU_ADDR          ; PPU address = $21CA
+
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$21              ; B
+    sta PPU_DATA
+    rts
+
+;---------------------------------------
+; Clear title text (called from NMI)
+;---------------------------------------
+clear_title_text:
+    ; Clear "PRESS A OR B" at row 14, column 10 (12 tiles)
+    bit PPU_STATUS
+    lda #$21
+    sta PPU_ADDR
+    lda #$CA
+    sta PPU_ADDR          ; PPU address = $21CA
+    lda #$00              ; Empty/sky tile
+    ldx #12
+@clear_loop:
+    sta PPU_DATA
+    dex
+    bne @clear_loop
     rts
 
 ;===============================================================================
