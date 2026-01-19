@@ -169,17 +169,20 @@ Spacing: 384 - 256 = 128 pixels
 
 **Column-Based Drawing (SMB-style):**
 
-Instead of burst-drawing entire pipes, we draw one vertical column per frame using PPU's +32 increment mode. This spreads work evenly across ~27 frames, with each frame doing minimal PPU work.
+Instead of burst-drawing entire pipes, we draw one vertical column per frame using PPU's +32 increment mode. This spreads work evenly across ~28 frames, with each frame doing minimal PPU work.
 
 ```
-idx 0-3:   Pipe 0 columns 0-3 (one column per frame)
-idx 4-11:  Cloud zone A columns 4-11 (cleared to empty)
-idx 12-15: Pipe 1 columns 16-19 (one column per frame)
-idx 16-23: Cloud zone B columns 20-27 (cleared to empty)
-idx 24:    Draw cloud 1 (if pattern has one)
-idx 25:    Draw cloud 2 (if pattern has one)
-idx 26:    Draw pipe attributes, mark done
+idx 0:     Draw pipe attributes FIRST (before any tiles)
+idx 1-4:   Pipe 0 columns 0-3 (one column per frame)
+idx 5-12:  Cloud zone A columns 4-11 (cleared to empty)
+idx 13-16: Pipe 1 columns 16-19 (one column per frame)
+idx 17-24: Cloud zone B columns 20-27 (cleared to empty)
+idx 25:    Draw cloud 1 (if pattern has one)
+idx 26:    Draw cloud 2 (if pattern has one)
+idx 27:    Mark done
 ```
+
+Drawing attributes FIRST ensures pipes always have correct palette, even if there's any timing edge case with nametable visibility.
 
 **Optimized Pipe Column Drawing:**
 

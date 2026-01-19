@@ -1558,17 +1558,21 @@ clear_title_text:
 ; Column-Based Pipe/Cloud Drawing (called from NMI during vblank)
 ;===============================================================================
 ; Draws one vertical column per frame using PPUCTRL +32 increment mode.
-; Spreads redraw work across ~27 frames instead of burst-drawing.
+; Spreads redraw work across ~28 frames instead of burst-drawing.
 ;
 ; Column layout:
-;   idx 0-3:   Pipe 0 columns 0-3
-;   idx 4-11:  Cloud zone A columns 4-11 (cleared to empty)
-;   idx 12-15: Pipe 1 columns 16-19
-;   idx 16-23: Cloud zone B columns 20-27 (cleared to empty)
-;   idx 24:    Draw cloud 1 (if pattern has one)
-;   idx 25:    Draw cloud 2 (if pattern has one)
-;   idx 26:    Draw pipe attributes, mark done
+;   idx 0:     Draw pipe attributes FIRST (before any tiles)
+;   idx 1-4:   Pipe 0 columns 0-3
+;   idx 5-12:  Cloud zone A columns 4-11 (cleared to empty)
+;   idx 13-16: Pipe 1 columns 16-19
+;   idx 17-24: Cloud zone B columns 20-27 (cleared to empty)
+;   idx 25:    Draw cloud 1 (if pattern has one)
+;   idx 26:    Draw cloud 2 (if pattern has one)
+;   idx 27:    Mark done
 ;   idx $FF:   Idle (no redraw in progress)
+;
+; Drawing attributes FIRST ensures pipes always have correct palette,
+; even if there's any timing edge case with nametable visibility.
 ;
 ; Variables:
 ;   col_draw_idx  - Current column index (0-24, $FF=idle)
@@ -1586,24 +1590,46 @@ draw_column:
 
 @active:
     ; Dispatch based on column index
-    cmp #4
-    bcc @pipe0_col        ; 0-3: Pipe 0
-    cmp #12
-    bcc @cloud_a_col      ; 4-11: Cloud zone A
-    cmp #16
-    bcc @pipe1_col        ; 12-15: Pipe 1
-    cmp #24
-    bcc @cloud_b_col      ; 16-23: Cloud zone B
+    ; idx 0: Draw pipe attributes FIRST (before any tiles)
+    ; idx 1-4: Pipe 0 columns 0-3
+    ; idx 5-12: Cloud zone A columns 4-11
+    ; idx 13-16: Pipe 1 columns 16-19
+    ; idx 17-24: Cloud zone B columns 20-27
+    ; idx 25-26: Draw clouds
+    ; idx 27: Mark done
+    cmp #1
+    bcc @draw_attrs       ; 0: Draw pipe attrs first
+    cmp #5
+    bcc @pipe0_col        ; 1-4: Pipe 0
+    cmp #13
+    bcc @cloud_a_col      ; 5-12: Cloud zone A
+    cmp #17
+    bcc @pipe1_col        ; 13-16: Pipe 1
     cmp #25
-    bcc @draw_cloud_1     ; 24: Draw cloud 1
-    beq @draw_cloud_2     ; 25: Draw cloud 2
-    jmp @draw_attrs       ; 26: Draw pipe attrs and finish
+    bcc @cloud_b_col      ; 17-24: Cloud zone B
+    cmp #26
+    bcc @draw_cloud_1     ; 25: Draw cloud 1
+    beq @draw_cloud_2     ; 26: Draw cloud 2
+    jmp @mark_done        ; 27: Mark done
 
 ;---------------------------------------
-; Pipe 0 columns (idx 0-3 -> cols 0-3)
+; Draw pipe attributes (idx 0) - FIRST before any tiles
+;---------------------------------------
+@draw_attrs:
+    bit PPU_STATUS        ; Reset PPU latch
+    lda col_nt_base
+    sta nt_base
+    jsr draw_pipe0_attrs_only
+    jsr draw_pipe1_attrs_only
+    jmp @next_column
+
+;---------------------------------------
+; Pipe 0 columns (idx 1-4 -> cols 0-3)
 ;---------------------------------------
 @pipe0_col:
-    ; Column = col_draw_idx
+    ; Column = col_draw_idx - 1
+    sec
+    sbc #1
     sta pipe_col
     lda col_pipe0_gap
     sta pipe_gap
@@ -1611,21 +1637,23 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Cloud zone A (idx 4-11 -> cols 4-11)
+; Cloud zone A (idx 5-12 -> cols 4-11)
 ;---------------------------------------
 @cloud_a_col:
-    ; Column = col_draw_idx (4-11)
+    ; Column = col_draw_idx - 1 (idx 5->col 4, idx 12->col 11)
+    sec
+    sbc #1
     sta pipe_col
     jsr draw_empty_column
     jmp @next_column
 
 ;---------------------------------------
-; Pipe 1 columns (idx 12-15 -> cols 16-19)
+; Pipe 1 columns (idx 13-16 -> cols 16-19)
 ;---------------------------------------
 @pipe1_col:
-    ; Column = col_draw_idx - 12 + 16 = col_draw_idx + 4
+    ; Column = col_draw_idx + 3 (idx 13->col 16, idx 14->col 17, etc.)
     clc
-    adc #4                ; idx 12->col 16, idx 13->col 17, etc.
+    adc #3
     sta pipe_col
     lda col_pipe1_gap
     sta pipe_gap
@@ -1633,18 +1661,18 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Cloud zone B (idx 16-23 -> cols 20-27)
+; Cloud zone B (idx 17-24 -> cols 20-27)
 ;---------------------------------------
 @cloud_b_col:
-    ; Column = col_draw_idx + 4 (idx 16->col 20, idx 17->col 21, etc.)
+    ; Column = col_draw_idx + 3 (idx 17->col 20, idx 24->col 27)
     clc
-    adc #4
+    adc #3
     sta pipe_col
     jsr draw_empty_column
     jmp @next_column
 
 ;---------------------------------------
-; Draw cloud 1 (idx 24)
+; Draw cloud 1 (idx 25)
 ; Pick random pattern, store offset, draw first cloud
 ;---------------------------------------
 @draw_cloud_1:
@@ -1674,7 +1702,7 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Draw cloud 2 (idx 25)
+; Draw cloud 2 (idx 26)
 ;---------------------------------------
 @draw_cloud_2:
     bit PPU_STATUS        ; Reset PPU latch
@@ -1683,7 +1711,7 @@ draw_column:
     ; Draw cloud 2 using stored pattern offset
     ldx cloud_pattern_ofs
     lda cloud_patterns+3, x
-    beq @next_column      ; col=0 means no cloud, continue to attrs
+    beq @next_column      ; col=0 means no cloud
     sta cloud_col
     lda cloud_patterns+4, x
     sta cloud_size
@@ -1693,15 +1721,9 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Draw pipe attributes and finish (idx 26)
+; Mark done (idx 27)
 ;---------------------------------------
-@draw_attrs:
-    bit PPU_STATUS        ; Reset PPU latch
-    lda col_nt_base
-    sta nt_base
-    jsr draw_pipe0_attrs_only
-    jsr draw_pipe1_attrs_only
-    ; Mark as done
+@mark_done:
     lda #$FF
     sta col_draw_idx
     rts
