@@ -75,10 +75,16 @@ cloud_size      = $26   ; Cloud size (0=single/4, 1=double/6, 2=triple/8)
 cloud_temp      = $27   ; Temporary variable
 
 ; Column-based drawing variables
-col_draw_idx    = $28   ; Current column index (0-23, $FF=idle)
+col_draw_idx    = $28   ; Current column index (0-25, $FF=idle)
 col_nt_base     = $29   ; Nametable being redrawn ($20=NT0, $24=NT1)
 col_pipe0_gap   = $2A   ; Gap row for pipe 0 being drawn
 col_pipe1_gap   = $2B   ; Gap row for pipe 1 being drawn
+cloud_pattern_ofs = $2C ; Cloud pattern offset (stored between frames 24-25)
+col_buffer_ready = $2D  ; Flag: 1 = pipe column buffer filled, ready for NMI
+
+; Pipe column tile buffer (26 bytes at $0300-$0319)
+; Pre-filled in main loop, copied to PPU during NMI
+PIPE_COL_BUFFER = $0300
 
 ; Shell sprite (death animation)
 SHELL_TILE_BASE = $1A   ; 2x2 shell tiles at $1A-$1D

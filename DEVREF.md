@@ -169,16 +169,39 @@ Spacing: 384 - 256 = 128 pixels
 
 **Column-Based Drawing (SMB-style):**
 
-Instead of burst-drawing entire pipes, we draw one vertical column per frame using PPU's +32 increment mode. This spreads work evenly across ~27 frames, with each frame doing only ~26 PPU writes.
+Instead of burst-drawing entire pipes, we draw one vertical column per frame using PPU's +32 increment mode. This spreads work evenly across ~27 frames, with each frame doing minimal PPU work.
 
 ```
 idx 0-3:   Pipe 0 columns 0-3 (one column per frame)
 idx 4-11:  Cloud zone A columns 4-11 (cleared to empty)
 idx 12-15: Pipe 1 columns 16-19 (one column per frame)
 idx 16-23: Cloud zone B columns 20-27 (cleared to empty)
-idx 24:    Pipe 0 attributes
-idx 25:    Pipe 1 attributes
-idx 26:    Draw random clouds, mark done
+idx 24:    Draw cloud 1 (if pattern has one)
+idx 25:    Draw cloud 2 (if pattern has one)
+idx 26:    Draw pipe attributes, mark done
+```
+
+**Optimized Pipe Column Drawing:**
+
+Pipe columns use counted loops instead of per-row comparisons. The structure is fixed:
+- Top body (gap-2 rows)
+- Cap row 1 + Cap row 2
+- Gap (8 empty tiles)
+- Cap row 1 + Cap row 2
+- Bottom body (16-gap rows)
+
+```asm
+; Calculate counts once, then use simple loops
+lda pipe_gap
+sec
+sbc #2
+tay                   ; Y = top body count
+lda pipe_top_body_tiles, x
+@top_body_loop:
+sta PPU_DATA
+dey
+bne @top_body_loop
+; ... caps, gap, bottom body follow same pattern
 ```
 
 **Vertical Increment Mode:**
@@ -194,10 +217,10 @@ sta PPU_CTRL
 
 | Operation | PPU Writes | Cycles |
 |-----------|-----------|--------|
-| Pipe column | 26 tiles | ~200 |
-| Empty column | 26 tiles | ~180 |
-| Attributes | 7 bytes | ~170 |
-| Draw clouds | Variable | ~300-600 |
+| Pipe column (optimized) | 26 tiles | ~280 |
+| Empty column | 26 tiles | ~280 |
+| Cloud (1 per frame) | ~12-24 tiles | ~350 |
+| Attributes | 14 bytes | ~280 |
 
 All frames well under the ~1700 cycle budget (after OAM DMA).
 
@@ -738,7 +761,14 @@ At init, entire sky area (attr rows 0-5) is set to palette 3 ($FF = all quadrant
 - Empty sky tiles still appear as sky blue (color 0)
 - All clouds automatically use correct palette
 - No per-cloud attribute management needed
-- Pipe drawing overwrites columns 0 and 4 with pipe palette
+
+**Pipe Attribute Handling:**
+
+- NT1: Pipe attributes set at init (NT1 has pipes from start)
+- NT0: Pipe attributes NOT set at init (NT0 starts empty with title text)
+- NT0 attributes set later during column-based redraw (idx 26)
+
+This prevents the title text "PRESS A OR B" from being colored green by pipe attributes. The text uses palette 3 (sky/cloud palette) which provides white text on blue background.
 
 **Cloud Regeneration on Scroll:**
 

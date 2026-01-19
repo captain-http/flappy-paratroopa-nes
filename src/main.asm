@@ -393,12 +393,9 @@ reset:
     dex
     bne @attr1_ground
 
-    ; Set pipe attributes for BOTH nametables at init
-    ; This way we never need to redraw them during gameplay
-    lda #$20
-    sta nt_base
-    jsr draw_pipe0_attrs_only
-    jsr draw_pipe1_attrs_only
+    ; Set pipe attributes for NT1 only at init (NT1 has pipes)
+    ; NT0 starts empty with title text, so don't set its attrs yet
+    ; NT0 attrs will be set when it's redrawn with pipes
     lda #$24
     sta nt_base
     jsr draw_pipe0_attrs_only
@@ -1561,17 +1558,17 @@ clear_title_text:
 ; Column-Based Pipe/Cloud Drawing (called from NMI during vblank)
 ;===============================================================================
 ; Draws one vertical column per frame using PPUCTRL +32 increment mode.
-; Spreads redraw work across ~25 frames instead of burst-drawing.
+; Spreads redraw work across ~27 frames instead of burst-drawing.
 ;
 ; Column layout:
 ;   idx 0-3:   Pipe 0 columns 0-3
 ;   idx 4-11:  Cloud zone A columns 4-11 (cleared to empty)
 ;   idx 12-15: Pipe 1 columns 16-19
 ;   idx 16-23: Cloud zone B columns 20-27 (cleared to empty)
-;   idx 24:    Draw clouds, mark done
+;   idx 24:    Draw cloud 1 (if pattern has one)
+;   idx 25:    Draw cloud 2 (if pattern has one)
+;   idx 26:    Draw pipe attributes, mark done
 ;   idx $FF:   Idle (no redraw in progress)
-;
-; Note: Pipe attributes are set once at init and never changed.
 ;
 ; Variables:
 ;   col_draw_idx  - Current column index (0-24, $FF=idle)
@@ -1589,7 +1586,6 @@ draw_column:
 
 @active:
     ; Dispatch based on column index
-    ; Pipe attributes set at init, no need to redraw
     cmp #4
     bcc @pipe0_col        ; 0-3: Pipe 0
     cmp #12
@@ -1598,8 +1594,10 @@ draw_column:
     bcc @pipe1_col        ; 12-15: Pipe 1
     cmp #24
     bcc @cloud_b_col      ; 16-23: Cloud zone B
-    ; 24: Draw clouds and finish
-    jmp @draw_clouds
+    cmp #25
+    bcc @draw_cloud_1     ; 24: Draw cloud 1
+    beq @draw_cloud_2     ; 25: Draw cloud 2
+    jmp @draw_attrs       ; 26: Draw pipe attrs and finish
 
 ;---------------------------------------
 ; Pipe 0 columns (idx 0-3 -> cols 0-3)
@@ -1646,14 +1644,63 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Draw clouds and finish (idx 24)
-; Pipe attributes are set at init, no redraw needed
+; Draw cloud 1 (idx 24)
+; Pick random pattern, store offset, draw first cloud
 ;---------------------------------------
-@draw_clouds:
+@draw_cloud_1:
     bit PPU_STATUS        ; Reset PPU latch
     lda col_nt_base
     sta nt_base
-    jsr draw_random_clouds
+    ; Pick random pattern (0-15) and calculate offset
+    jsr rand_lfsr
+    lda rng_hi
+    and #$0F              ; 0-15
+    sta cloud_temp
+    asl a                 ; *2
+    clc
+    adc cloud_temp        ; *3
+    asl a                 ; *6
+    sta cloud_pattern_ofs ; Store for next frame
+    tax
+    ; Draw cloud 1 if it exists
+    lda cloud_patterns, x
+    beq @next_column      ; col=0 means no cloud
+    sta cloud_col
+    lda cloud_patterns+1, x
+    sta cloud_size
+    lda cloud_patterns+2, x
+    sta cloud_row
+    jsr draw_one_cloud
+    jmp @next_column
+
+;---------------------------------------
+; Draw cloud 2 (idx 25)
+;---------------------------------------
+@draw_cloud_2:
+    bit PPU_STATUS        ; Reset PPU latch
+    lda col_nt_base
+    sta nt_base
+    ; Draw cloud 2 using stored pattern offset
+    ldx cloud_pattern_ofs
+    lda cloud_patterns+3, x
+    beq @next_column      ; col=0 means no cloud, continue to attrs
+    sta cloud_col
+    lda cloud_patterns+4, x
+    sta cloud_size
+    lda cloud_patterns+5, x
+    sta cloud_row
+    jsr draw_one_cloud
+    jmp @next_column
+
+;---------------------------------------
+; Draw pipe attributes and finish (idx 26)
+;---------------------------------------
+@draw_attrs:
+    bit PPU_STATUS        ; Reset PPU latch
+    lda col_nt_base
+    sta nt_base
+    jsr draw_pipe0_attrs_only
+    jsr draw_pipe1_attrs_only
     ; Mark as done
     lda #$FF
     sta col_draw_idx
@@ -1670,6 +1717,9 @@ draw_column:
 ; Draw one vertical pipe column using PPUCTRL +32 mode
 ; Input: pipe_col (0-31), pipe_gap, col_nt_base
 ; Draws rows 0-25 (ground at row 26)
+;
+; Optimized: Uses counted loops instead of per-row comparisons
+; Structure: top_body, cap1, cap2, gap(8), cap1, cap2, bot_body
 ;===============================================================================
 draw_pipe_column:
     bit PPU_STATUS        ; Reset PPU latch
@@ -1682,106 +1732,73 @@ draw_pipe_column:
 
     ; Enable vertical increment mode (+32)
     lda #%10010100        ; NMI on, sprites $0000, bg $1000, +32 increment
-    ora scroll_nt         ; Preserve current nametable for rendering
+    ora scroll_nt
     sta PPU_CTRL
 
-    ; Determine which column within pipe (0-3)
+    ; Get column tile index (0-3)
     lda pipe_col
-    and #$03              ; 0, 1, 2, or 3
-    tax                   ; X = column within pipe
+    and #$03
+    tax                   ; X = column within pipe (preserved throughout)
 
-    ; Draw rows 0 to 25
-    ldy #0                ; Y = current row
-@draw_loop:
-    ; Determine tile based on row and pipe structure
-    ; Top pipe body: rows 0 to (gap-3)
-    ; Top cap row 1: row (gap-2)
-    ; Top cap row 2: row (gap-1)
-    ; Gap: rows gap to (gap+7)
-    ; Bot cap row 1: row (gap+8)
-    ; Bot cap row 2: row (gap+9)
-    ; Bot pipe body: rows (gap+10) to 25
-
-    tya
-    clc
-    adc #3                ; A = row + 3
-    cmp pipe_gap          ; Compare (row + 3) with gap
-    bcc @top_body         ; row + 3 < gap => row < gap - 3 => top body
-
-    tya
-    clc
-    adc #2
-    cmp pipe_gap          ; Compare (row + 2) with gap
-    bcc @top_cap1         ; row + 2 < gap => row = gap - 2 => top cap row 1
-
-    tya
-    clc
-    adc #1
-    cmp pipe_gap
-    bcc @top_cap2         ; row + 1 < gap => row = gap - 1 => top cap row 2
-
-    tya
-    cmp pipe_gap
-    bcc @gap_tile         ; row < gap (shouldn't happen after above checks)
-
-    ; row >= gap
-    tya
+    ; --- Top body: rows 0 to (gap-3) ---
+    ; Count = gap - 2 (but at least 0)
+    lda pipe_gap
     sec
-    sbc pipe_gap          ; A = row - gap
-    cmp #GAP_ROWS
-    bcc @gap_tile         ; row - gap < 8 => in gap
-
-    ; row >= gap + 8
-    cmp #GAP_ROWS
-    beq @bot_cap1         ; row - gap = 8 => bot cap row 1
-
-    cmp #(GAP_ROWS + 1)
-    beq @bot_cap2         ; row - gap = 9 => bot cap row 2
-
-    ; row - gap >= 10 => bot body
-    jmp @bot_body
-
-@top_body:
-    ; Top pipe body tiles: $19, $1A, $1B, $1C (cols 0-3)
+    sbc #2
+    beq @top_cap1         ; If gap <= 2, skip top body
+    bmi @top_cap1         ; Safety check
+    tay                   ; Y = top body count
     lda pipe_top_body_tiles, x
-    jmp @write_tile
+@top_body_loop:
+    sta PPU_DATA
+    dey
+    bne @top_body_loop
 
 @top_cap1:
-    ; Top cap row 1 (under lip): $15, $16, $17, $18
+    ; --- Top cap row 1 ---
     lda pipe_top_cap1_tiles, x
-    jmp @write_tile
+    sta PPU_DATA
 
 @top_cap2:
-    ; Top cap row 2 (lip edge): $11, $12, $13, $14
+    ; --- Top cap row 2 ---
     lda pipe_top_cap2_tiles, x
-    jmp @write_tile
+    sta PPU_DATA
 
-@gap_tile:
-    ; Gap: empty tile
+@gap:
+    ; --- Gap: 8 empty tiles ---
     lda #$00
-    jmp @write_tile
+    ldy #GAP_ROWS         ; 8 rows
+@gap_loop:
+    sta PPU_DATA
+    dey
+    bne @gap_loop
 
 @bot_cap1:
-    ; Bot cap row 1: $05, $06, $07, $08
+    ; --- Bot cap row 1 ---
     lda pipe_bot_cap1_tiles, x
-    jmp @write_tile
+    sta PPU_DATA
 
 @bot_cap2:
-    ; Bot cap row 2: $09, $0A, $0B, $0C
+    ; --- Bot cap row 2 ---
     lda pipe_bot_cap2_tiles, x
-    jmp @write_tile
+    sta PPU_DATA
 
 @bot_body:
-    ; Bot pipe body: $0D, $0E, $0F, $10
+    ; --- Bot body: rows (gap+10) to 25 ---
+    ; Count = 26 - (gap + 10) = 16 - gap
+    lda #16
+    sec
+    sbc pipe_gap
+    beq @done             ; If gap >= 16, no bot body
+    bmi @done             ; Safety check
+    tay                   ; Y = bot body count
     lda pipe_bot_body_tiles, x
-    ; Fall through to write_tile
-
-@write_tile:
+@bot_body_loop:
     sta PPU_DATA
-    iny
-    cpy #26               ; Rows 0-25 (stop before ground at 26)
-    bcc @draw_loop
+    dey
+    bne @bot_body_loop
 
+@done:
     ; Restore horizontal increment mode (+1)
     lda #%10010000        ; NMI on, sprites $0000, bg $1000, +1 increment
     ora scroll_nt
