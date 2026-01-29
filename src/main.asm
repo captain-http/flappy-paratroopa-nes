@@ -1666,11 +1666,11 @@ show_game_over_screen:
     dex
     bne @set_attrs
 
-    ; Draw "GAME OVER" at row 8, col 11 = $2000 + 8*32 + 11 = $210B
+    ; Draw "GAME OVER" at row 7, col 11 = $2000 + 7*32 + 11 = $20EB
     bit PPU_STATUS
-    lda #$21
+    lda #$20
     sta PPU_ADDR
-    lda #$0B
+    lda #$EB
     sta PPU_ADDR
     lda #$26              ; G
     sta PPU_DATA
