@@ -3,10 +3,6 @@
 
 .include "nes.inc"
 .include "constants.inc"
-.include "BG0.asm"
-.include "BG1.asm"
-.include "BG2.asm"
-.include "BG3.asm"
 
 ;===============================================================================
 ; iNES Header
@@ -1366,8 +1362,8 @@ fade_palette_spr:
 ; Stored in separate .asm files, included at top of main.asm
 ;
 ; Memory layout per background:
-;   Bytes 0-959:    Nametable tiles (30 rows x 32 cols)
-;   Bytes 960-1023: Attribute table (8 rows x 8 cols)
+;   960 bytes per background (30 rows x 32 cols)
+;   Attributes are static (handled by init_attributes)
 ;
 ; Index:  0     1     2     3
 ;         bg0   bg1   bg2   bg3
@@ -1379,6 +1375,12 @@ bg_table_hi:
     .byte >BG0, >BG1, >BG2, >BG3
 
 BG_COUNT = 4    ; 4 backgrounds that loop
+
+; Background nametable data (960 bytes each)
+BG0: .incbin "../nam/bg0.nam"
+BG1: .incbin "../nam/bg1.nam"
+BG2: .incbin "../nam/bg2.nam"
+BG3: .incbin "../nam/bg3.nam"
 
 ;===============================================================================
 ; Switch to Shell Sprite (Death Animation)
