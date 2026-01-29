@@ -17,6 +17,7 @@ make clean    # Clean build artifacts
 ```
 src/          # Assembly source and includes
 chr/          # CHR graphics data
+nam/          # Background nametable data (.nam binary files)
 scripts/      # FCEUX Lua debug scripts
 nes.cfg       # Linker config (NROM-256)
 build/        # Output directory
@@ -57,7 +58,8 @@ When the Koopa dies, it goes through a multi-state animation:
 1. **Shell** (`STATE_DYING`/`STATE_STUNNED`): Hides in shell, falls to ground
 2. **Stunned**: Feet peek out animation (toggles every 10 frames)
 3. **Walk Off** (`STATE_WALK_OFF`): Walks left off screen
-4. **Fade Out** (`STATE_FADE_OUT`): Palette fades to black, then full reset
+4. **Fade Out** (`STATE_FADE_OUT`): Palette fades to black
+5. **Game Over** (`STATE_GAME_OVER`): Results screen, press START to restart
 
 **Shell Tiles (2x2):**
 
@@ -78,6 +80,37 @@ When the Koopa dies, it goes through a multi-state animation:
 - `switch_to_shell` - Transition to shell sprite
 - `switch_to_walking` - Transition to walking sprite
 - `apply_fade_palette` - Apply current fade level
+
+### Game Over Screen
+
+After fade-out, displays results on a black background with white text:
+
+**Normal game:**
+```
+GAME OVER
+SCORE XXX
+BEST XXX
+NICE TRY!
+PUSH START!
+```
+
+**New high score:**
+```
+GAME OVER
+SCORE XXX
+NEW RECORD!
+SHARE IT!
+#FLAPPYPARATROOPA
+PUSH START!
+```
+
+**Tiles used:**
+- Alphabet: `$20`-`$39` (A=`$20`, B=`$21`, ...)
+- Background digits: `$50`-`$59` (0=`$50`, 1=`$51`, ...)
+- Special: `!`=`$48`, `#`=`$49`
+
+**Key subroutine:**
+- `show_game_over_screen` - Clears nametable, draws text, enables BG rendering
 
 ## Scoring System
 
@@ -177,7 +210,25 @@ SMB-style clouds using pattern-based randomization. Clouds regenerate each time 
 
 Sky area (attr rows 0-5) prefilled with palette 3 at init. Title text tiles should use palette 3 colors.
 
-## Agents
+## Background System
+
+Backgrounds are stored as binary `.nam` files in the `nam/` directory (960 bytes each, no attribute data).
+
+| File | Contents |
+|------|----------|
+| `bg0.nam` | Initial empty sky |
+| `bg1.nam` | Sky with hill and bush |
+| `bg2.nam` | Sky with single cloud |
+| `bg3.nam` | Sky with two clouds |
+
+Backgrounds cycle as the game scrolls. Each nametable (256 pixels) loads a new background when it wraps.
+
+### Title Text
+
+On the title screen, "PRESS A OR B" / "TO PLAY!" displays using palette 3 (white text).
+The attribute at `$23DC` is temporarily set to `$FF` for palette 3, then restored to `$AA` when NT0 wraps during gameplay.
+
+## Agents & Skills
 
 Use these agents for NES development tasks:
 
@@ -193,3 +244,11 @@ Use these agents for NES development tasks:
 - Writing/optimizing 6502 code → `6502-asm-expert`
 - Assembler syntax issues → `ca65-expert`
 - Linker/memory issues → `ld65-expert`
+
+### NES Dev Skill
+
+The `nes-dev-expert` skill (`.claude/skills/nes-dev-expert/`) includes reference docs:
+- `ppu-reference.md` - PPU registers, pattern tables, attributes, OAM
+- `apu-reference.md` - APU channels and registers
+- `patterns.md` - Common NES code patterns
+- `mappers.md` - NROM, UxROM, MMC1, MMC3 mapper info
