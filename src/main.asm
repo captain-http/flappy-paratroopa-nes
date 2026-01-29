@@ -1959,18 +1959,16 @@ show_game_over_screen:
     lda #$0F
     sta PPU_DATA
 
-    ; Skip to palette 3 (offset $0D)
+    ; Set palette 3 (offset $0D): white text on black bg
     lda #$3F
     sta PPU_ADDR
     lda #$0D
     sta PPU_ADDR
-    lda #$0F              ; Black
+    lda #$30              ; Color 1 = White (text)
     sta PPU_DATA
-    lda #$30              ; White
+    lda #$30              ; Color 2 = White
     sta PPU_DATA
-    lda #$30              ; White
-    sta PPU_DATA
-    lda #$30              ; White
+    lda #$30              ; Color 3 = White
     sta PPU_DATA
 
     ; Enable rendering
