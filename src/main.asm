@@ -1942,9 +1942,11 @@ show_game_over_screen:
     lda #$48              ; !
     sta PPU_DATA
 
-    ; Reset scroll
-    bit PPU_STATUS
+    ; Reset scroll position and variables
     lda #$00
+    sta scroll_x          ; Reset scroll variable
+    sta scroll_nt         ; Reset nametable select
+    bit PPU_STATUS
     sta PPU_SCROLL
     sta PPU_SCROLL
 
