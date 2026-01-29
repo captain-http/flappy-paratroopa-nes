@@ -1722,7 +1722,8 @@ show_game_over_screen:
     lda #$31              ; R
     sta PPU_DATA
 
-    ; Draw "SCORE" at row 12, col 11 = $2000 + 12*32 + 11 = $218B
+    ; Draw "SCORE  XXX" at row 12, col 11 = $2000 + 12*32 + 11 = $218B
+    ; BG digit tiles at $50-$59
     lda #$21
     sta PPU_ADDR
     lda #$8B
@@ -1737,18 +1738,22 @@ show_game_over_screen:
     sta PPU_DATA
     lda #$24              ; E
     sta PPU_DATA
-
-    ; Position score sprites at row 12 (Y=95, X starts at 144)
-    lda #95               ; Row 12: 12*8 - 1 = 95
-    sta OAM_BUFFER+24     ; Hundreds Y
-    sta OAM_BUFFER+28     ; Tens Y
-    sta OAM_BUFFER+32     ; Ones Y
-    lda #144              ; Col 18: 18*8 = 144
-    sta OAM_BUFFER+27     ; Hundreds X
-    lda #152              ; Col 19
-    sta OAM_BUFFER+31     ; Tens X
-    lda #160              ; Col 20
-    sta OAM_BUFFER+35     ; Ones X
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda score_hundreds
+    clc
+    adc #$50              ; BG digit tiles start at $50
+    sta PPU_DATA
+    lda score_tens
+    clc
+    adc #$50
+    sta PPU_DATA
+    lda score_ones
+    clc
+    adc #$50
+    sta PPU_DATA
 
     ; Check if new record
     lda new_record
@@ -1757,7 +1762,7 @@ show_game_over_screen:
 
 @draw_normal:
     ; --- Normal game over (not new record) ---
-    ; Draw "BEST" at row 14, col 11 = $2000 + 14*32 + 11 = $21CB
+    ; Draw "BEST   XXX" at row 14, col 11 = $2000 + 14*32 + 11 = $21CB
     lda #$21
     sta PPU_ADDR
     lda #$CB
@@ -1770,35 +1775,24 @@ show_game_over_screen:
     sta PPU_DATA
     lda #$33              ; T
     sta PPU_DATA
-
-    ; Position hiscore sprites at row 14 (Y=111, X starts at 144)
-    ; Using OAM_BUFFER+36,40,44 for hiscore digits
-    lda #111              ; Row 14: 14*8 - 1 = 111
-    sta OAM_BUFFER+36     ; Hundreds Y
-    sta OAM_BUFFER+40     ; Tens Y
-    sta OAM_BUFFER+44     ; Ones Y
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
     lda hiscore_hundreds
     clc
-    adc #DIGIT_TILE_BASE
-    sta OAM_BUFFER+37     ; Hundreds tile
+    adc #$50
+    sta PPU_DATA
     lda hiscore_tens
     clc
-    adc #DIGIT_TILE_BASE
-    sta OAM_BUFFER+41     ; Tens tile
+    adc #$50
+    sta PPU_DATA
     lda hiscore_ones
     clc
-    adc #DIGIT_TILE_BASE
-    sta OAM_BUFFER+45     ; Ones tile
-    lda #$00              ; Attributes (palette 0)
-    sta OAM_BUFFER+38
-    sta OAM_BUFFER+42
-    sta OAM_BUFFER+46
-    lda #144              ; X positions
-    sta OAM_BUFFER+39
-    lda #152
-    sta OAM_BUFFER+43
-    lda #160
-    sta OAM_BUFFER+47
+    adc #$50
+    sta PPU_DATA
 
     ; Draw "NICE TRY!" at row 18, col 11 = $2000 + 18*32 + 11 = $224B
     lda #$22
@@ -1828,12 +1822,6 @@ show_game_over_screen:
 
 @draw_new_record:
     ; --- New record! ---
-    ; Hide hiscore sprites (not showing BEST on new record)
-    lda #$FF
-    sta OAM_BUFFER+36
-    sta OAM_BUFFER+40
-    sta OAM_BUFFER+44
-
     ; Draw "NEW RECORD!" at row 14, col 10 = $2000 + 14*32 + 10 = $21CA
     lda #$21
     sta PPU_ADDR
@@ -1986,8 +1974,8 @@ show_game_over_screen:
     lda #$30              ; Color 3 = White
     sta PPU_DATA
 
-    ; Enable rendering (bg + sprites for score display)
-    lda #%00011110
+    ; Enable rendering (background only)
+    lda #%00001010
     sta PPU_MASK
 
     ; Set PPUCTRL for NMI
