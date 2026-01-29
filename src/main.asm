@@ -3,6 +3,10 @@
 
 .include "nes.inc"
 .include "constants.inc"
+.include "BG0.asm"
+.include "BG1.asm"
+.include "BG2.asm"
+.include "BG3.asm"
 
 ;===============================================================================
 ; iNES Header
@@ -11,8 +15,8 @@
     .byte "NES", $1A      ; iNES magic number
     .byte $02             ; PRG-ROM: 2 x 16KB = 32KB
     .byte $01             ; CHR-ROM: 1 x 8KB = 8KB
-    .byte $01             ; Flags 6: vertical mirroring, no battery, no trainer, NROM
-    .byte $00             ; Flags 7: mapper 0 (NROM)
+    .byte $12             ; Flags 6: vertical mirroring, battery-backed SRAM, MMC1 lower nibble
+    .byte $00             ; Flags 7: mapper upper nibble = 0 (MMC1 = mapper 1)
     .byte $00, $00, $00, $00, $00, $00, $00, $00  ; Padding
 
 ;===============================================================================
@@ -40,6 +44,23 @@ reset:
     stx PPU_MASK          ; Disable rendering
     stx $4010             ; Disable DMC IRQs
 
+    ; MMC1 Initialization
+    ; Reset shift register by writing with bit 7 set
+    lda #$80
+    sta $8000
+
+    ; Control register ($8000): $0E = vertical mirroring, PRG mode 3, CHR 8KB
+    lda #$0E
+    jsr mmc1_write_8000
+
+    ; CHR bank 0 ($A000): $00 = bank 0, PRG-RAM enabled (bit 4 = 0)
+    lda #$00
+    jsr mmc1_write_A000
+
+    ; PRG bank ($E000): $00 = bank 0, PRG-RAM enabled (bit 4 = 0)
+    lda #$00
+    jsr mmc1_write_E000
+
     ; Wait for first vblank (PPU warmup)
 @vblank1:
     bit PPU_STATUS
@@ -63,6 +84,9 @@ reset:
 @vblank2:
     bit PPU_STATUS
     bpl @vblank2
+
+    ; Load hi-score from SRAM (or initialize if invalid)
+    jsr load_hiscore
 
     ; Enable APU channels (pulse 1 for flap/death, pulse 2 for score, noise for crash)
     lda #%00001111        ; Enable pulse 1, 2, triangle, and noise
@@ -129,23 +153,26 @@ reset:
     lda #$27              ; Color 3 - orange (feet/details)
     sta PPU_DATA
 
-    ; Clear both nametables (VRAM persists on reset)
-    bit PPU_STATUS
-    lda #$20
-    sta PPU_ADDR
-    lda #$00
-    sta PPU_ADDR          ; PPU address = $2000
-    tax                   ; X = 0, A = 0 (sky tile)
-    ldy #8                ; 8 pages = 2048 bytes (NT0 + NT1)
-@clear_nametables:
-    sta PPU_DATA
-    inx
-    bne @clear_nametables
-    dey
-    bne @clear_nametables
+    ; Load background 0 (title screen) into NT0
+    lda #0
+    sta bg_index
+    lda #$20              ; Target = NT0
+    jsr load_background_only
 
-    ; Draw "PRESS A OR B" title text in NT0
+    lda #1
+    sta bg_index
+    lda #$24              ; Target = NT1
+    jsr load_background_only
+
+    ; Set up static attribute tables for both nametables (once, never changes)
+    jsr init_attributes
+
+    ; Draw title text on NT0
     jsr draw_title_text
+
+    ; Next background to load when a nametable wraps
+    lda #2
+    sta next_bg_idx       ; bg0, bg1 loaded, next is bg2
 
     ; Initialize bird state (8.8 fixed-point)
     lda #0
@@ -176,6 +203,7 @@ reset:
     ; Initialize column drawing to idle (no active redraw)
     lda #$FF
     sta col_draw_idx
+    sta bg_load_row       ; No background loading in progress
     ; NT1 gaps will be set by draw_pipes_in_nt during init
     jsr next_pipe_gap     ; Set initial pipe_gap for NT1 pipe 0
 
@@ -349,72 +377,9 @@ reset:
     dex
     bne @fill_ground1_row29
 
-    ; Set attribute tables
-    ; Sky area (rows 0-5): palette 3 for clouds
-    ; Ground area (rows 6-7): palette 1
-
-    ; NT0 sky attributes (rows 0-5 = 48 bytes at $23C0-$23EF)
-    lda #$23
-    sta PPU_ADDR
-    lda #$C0
-    sta PPU_ADDR          ; $23C0 = attribute row 0
-    lda #$FF              ; %11111111 = palette 3 for all quadrants
-    ldx #48               ; 6 rows * 8 bytes
-@attr0_sky:
-    sta PPU_DATA
-    dex
-    bne @attr0_sky
-
-    ; NT0 ground attributes (rows 6-7 = 16 bytes at $23F0-$23FF)
-    lda #$55              ; %01010101 = palette 1 for all
-    ldx #16
-@attr0_ground:
-    sta PPU_DATA
-    dex
-    bne @attr0_ground
-
-    ; NT1 sky attributes (rows 0-5 = 48 bytes at $27C0-$27EF)
-    lda #$27
-    sta PPU_ADDR
-    lda #$C0
-    sta PPU_ADDR          ; $27C0 = attribute row 0
-    lda #$FF              ; %11111111 = palette 3 for all quadrants
-    ldx #48
-@attr1_sky:
-    sta PPU_DATA
-    dex
-    bne @attr1_sky
-
-    ; NT1 ground attributes (rows 6-7 = 16 bytes at $27F0-$27FF)
-    lda #$55              ; %01010101 = palette 1 for all
-    ldx #16
-@attr1_ground:
-    sta PPU_DATA
-    dex
-    bne @attr1_ground
-
-    ; Set pipe attributes for NT1 only at init (NT1 has pipes)
-    ; NT0 starts empty with title text, so don't set its attrs yet
-    ; NT0 attrs will be set when it's redrawn with pipes
-    lda #$24
-    sta nt_base
-    jsr draw_pipe0_attrs_only
-    jsr draw_pipe1_attrs_only
-
     ;=========================================================================
-    ; CLOUDS - Randomized placement
+    ; Pipe attributes baked into bg*.asm - no runtime attr writes needed
     ;=========================================================================
-    bit PPU_STATUS
-
-    ; Draw random clouds in NT0
-    lda #$20
-    sta nt_base
-    jsr draw_random_clouds
-
-    ; Draw random clouds in NT1
-    lda #$24
-    sta nt_base
-    jsr draw_random_clouds
 
     ; Draw pipes in NT1 (initial screen is empty NT0)
     ; Use eight-frame drawing routine (outside vblank, no constraint)
@@ -458,6 +423,7 @@ game_loop:
 
     ; Update score display sprites
     jsr update_score_display
+    jsr update_hiscore_display
 
     ; Update sound effects
     jsr update_sound
@@ -552,7 +518,8 @@ game_loop:
     lda bird_y
     cmp #GROUND_Y
     bcc @no_ground        ; bird_y < GROUND_Y, no collision
-    ; Bird hit ground - start stunned state
+    ; Bird hit ground - check hi-score and start stunned state
+    jsr check_update_hiscore
     lda #GROUND_Y         ; Clamp to ground
     sta bird_y
     lda #0                ; Stop falling
@@ -633,24 +600,35 @@ game_loop:
     lda scroll_nt
     eor #$01              ; Toggle bit 0
     sta scroll_nt
-    ; Queue column-based redraw for the nametable that just went off-screen
-    ; scroll_nt = 1: switched TO NT1, queue NT0 redraw
-    ; scroll_nt = 0: switched TO NT0, queue NT1 redraw
-    beq @queue_nt1
-    ; Switched to NT1 - queue NT0 redraw
-    ; Clear NT0 scored flags (bits 0-1)
+    ; Redraw pipes for the nametable that went off-screen
+    ; Backgrounds stay static (loaded at init) - only pipes change
+    ; scroll_nt = 1: switched TO NT1, redraw NT0
+    ; scroll_nt = 0: switched TO NT0, redraw NT1
+    beq @redraw_nt1
+    ; Switched to NT1 - redraw NT0
     lda pipes_scored
-    and #%11111100
+    and #%11111100        ; Clear NT0 scored flags
     sta pipes_scored
+    ; Load next background into NT0
+    lda next_bg_idx
+    sta bg_index
+    lda #$20              ; NT0
+    jsr load_bg_safe
+    jsr advance_next_bg
     lda #$20
     jsr start_column_redraw
     jmp @no_scroll
-@queue_nt1:
-    ; Switched to NT0 - queue NT1 redraw
-    ; Clear NT1 scored flags (bits 2-3)
+@redraw_nt1:
+    ; Switched to NT0 - redraw NT1
     lda pipes_scored
-    and #%11110011
+    and #%11110011        ; Clear NT1 scored flags
     sta pipes_scored
+    ; Load next background into NT1
+    lda next_bg_idx
+    sta bg_index
+    lda #$24              ; NT1
+    jsr load_bg_safe
+    jsr advance_next_bg
     lda #$24
     jsr start_column_redraw
 @no_scroll:
@@ -830,8 +808,7 @@ game_loop:
     beq @waiting_done
     lda #STATE_PLAYING
     sta game_state
-    lda #1
-    sta clear_title       ; Queue title clear for next NMI
+    ; Title text scrolls off naturally, attr restored when NT0 wraps
 @waiting_done:
     jmp game_loop
 
@@ -849,16 +826,12 @@ nmi:
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
 
+    ; Multi-frame background loading (2 rows per frame)
+    ; Must run BEFORE draw_column so pipes overwrite bg, not vice versa
+    jsr load_bg_rows
+
     ; Column-based pipe/cloud drawing (one column per frame)
     jsr draw_column
-
-    ; Check if we need to clear title text
-    lda clear_title
-    beq @no_clear_title
-    jsr clear_title_text
-    lda #0
-    sta clear_title
-@no_clear_title:
 
     ; Check if we need to update palette (fade effect)
     lda update_palette
@@ -1010,12 +983,12 @@ check_pipe_collision:
 
 @check_y:
     ; A = gap row for the overlapping pipe
-    ; Rectangle collision: bird (56,bird_y)-(72,bird_y+24) vs pipes
-    ; Bird is 2x3 tiles = 16x24 pixels
+    ; Rectangle collision uses only the shell body (2x2 = 16x16), not the head
+    ; Collision box: (56, bird_y+8) to (72, bird_y+24) - excludes 8px head
     ; Top pipe: Y from 0 to gap_top_y
     ; Bottom pipe: Y from gap_top_y+64 to ground
     ;
-    ; Bird safe if: bird_y >= gap_top_y AND bird_y+24 <= gap_top_y+64
+    ; Bird safe if: (bird_y+8) >= gap_top_y AND (bird_y+24) <= gap_top_y+64
 
     ; Calculate gap_top_y = gap * 8
     asl a
@@ -1023,26 +996,29 @@ check_pipe_collision:
     asl a                 ; A = gap_top_y
     sta pipe0_drawn_gap
 
-    ; Check top pipe: bird_y < gap_top_y means bird top is in top pipe
+    ; Check top pipe: (bird_y+8) < gap_top_y means shell top is in top pipe
     lda bird_y
-    cmp pipe0_drawn_gap   ; compare bird_y with gap_top_y
-    bcc @collision        ; bird_y < gap_top_y, hit top pipe
+    clc
+    adc #8                ; A = bird_y + 8 (top of shell, skip head)
+    cmp pipe0_drawn_gap   ; compare (bird_y+8) with gap_top_y
+    bcc @collision        ; (bird_y+8) < gap_top_y, hit top pipe
 
-    ; Check bottom pipe: bird_y+24 > gap_top_y+64 means bird bottom is in bottom pipe
+    ; Check bottom pipe: (bird_y+24) > gap_top_y+64 means shell bottom is in bottom pipe
     ; Equivalent: bird_y > gap_top_y+40
     lda pipe0_drawn_gap
     clc
     adc #(GAP_ROWS * 8)   ; A = gap_top_y + 64 (gap bottom / bottom pipe top)
     sec
-    sbc #24               ; A = gap_top_y + 40 (max safe bird_y for 24px bird)
+    sbc #24               ; A = gap_top_y + 40 (max safe bird_y for 24px tall collision)
     cmp bird_y            ; compare threshold with bird_y
-    bcc @collision        ; threshold < bird_y, bird bottom in pipe
+    bcc @collision        ; threshold < bird_y, shell bottom in pipe
 
 @no_collision:
     rts
 
 @collision:
-    ; Bird hit pipe - start dying
+    ; Bird hit pipe - check for hi-score before dying
+    jsr check_update_hiscore
     lda #STATE_DYING
     sta game_state
     jsr switch_to_shell
@@ -1384,6 +1360,27 @@ fade_palette_spr:
     .byte $0F, $0F, $0F, $0F
 
 ;===============================================================================
+; Background Data Pointer Table
+;===============================================================================
+; Each background is 1024 bytes (960 nametable tiles + 64 attributes)
+; Stored in separate .asm files, included at top of main.asm
+;
+; Memory layout per background:
+;   Bytes 0-959:    Nametable tiles (30 rows x 32 cols)
+;   Bytes 960-1023: Attribute table (8 rows x 8 cols)
+;
+; Index:  0     1     2     3
+;         bg0   bg1   bg2   bg3
+;         (title screen, future screens...)
+;
+bg_table_lo:
+    .byte <BG0, <BG1, <BG2, <BG3
+bg_table_hi:
+    .byte >BG0, >BG1, >BG2, >BG3
+
+BG_COUNT = 4    ; 4 backgrounds that loop
+
+;===============================================================================
 ; Switch to Shell Sprite (Death Animation)
 ;===============================================================================
 switch_to_shell:
@@ -1500,11 +1497,13 @@ update_score_display:
 ; Title Text Drawing
 ;===============================================================================
 draw_title_text:
-    ; Draw "PRESS A OR B" in front of bird
+    ; Draw "PRESS A OR B" on row 14, "TO PLAY" on row 15
     ; Row 14, column 10 = $21CA
+    ; Row 15, column 12 = $21EC (centered under line 1)
     ; Alphabet: A=$20, B=$21, ... Z=$39
-    ; P=$2F, R=$31, E=$24, S=$32, A=$20, O=$2E, B=$21
     bit PPU_STATUS
+
+    ; Line 1: "PRESS A OR B" at row 14, col 10
     lda #$21
     sta PPU_ADDR
     lda #$CA
@@ -1534,6 +1533,38 @@ draw_title_text:
     sta PPU_DATA
     lda #$21              ; B
     sta PPU_DATA
+
+    ; Line 2: "TO PLAY" at row 15, col 12
+    lda #$21
+    sta PPU_ADDR
+    lda #$EC
+    sta PPU_ADDR          ; PPU address = $21EC
+
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$2B              ; L
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$38              ; Y
+    sta PPU_DATA
+    lda #$48              ; !
+    sta PPU_DATA
+
+    ; Fix attribute for text area (attr row 3, byte 4 = $23DC)
+    ; Change from $AA (pipe palette) to $FF (cloud/text palette)
+    lda #$23
+    sta PPU_ADDR
+    lda #$DC
+    sta PPU_ADDR
+    lda #$FF              ; All quadrants use palette 3
+    sta PPU_DATA
     rts
 
 ;---------------------------------------
@@ -1548,10 +1579,31 @@ clear_title_text:
     sta PPU_ADDR          ; PPU address = $21CA
     lda #$00              ; Empty/sky tile
     ldx #12
-@clear_loop:
+@clear_line1:
     sta PPU_DATA
     dex
-    bne @clear_loop
+    bne @clear_line1
+
+    ; Clear "TO PLAY!" at row 15, column 12 (8 tiles)
+    lda #$21
+    sta PPU_ADDR
+    lda #$EC
+    sta PPU_ADDR          ; PPU address = $21EC
+    lda #$00
+    ldx #8
+@clear_line2:
+    sta PPU_DATA
+    dex
+    bne @clear_line2
+
+    ; Restore attribute for pipe area (attr row 3, byte 4 = $23DC)
+    ; Change from $FF (text palette) back to $AA (pipe palette)
+    lda #$23
+    sta PPU_ADDR
+    lda #$DC
+    sta PPU_ADDR
+    lda #$AA              ; All quadrants use palette 2
+    sta PPU_DATA
     rts
 
 ;===============================================================================
@@ -1589,38 +1641,43 @@ draw_column:
     rts                   ; Idle, nothing to do
 
 @active:
+    ; A already contains col_draw_idx from the check above
     ; Dispatch based on column index
     ; idx 0: Draw pipe attributes FIRST (before any tiles)
     ; idx 1-4: Pipe 0 columns 0-3
-    ; idx 5-12: Cloud zone A columns 4-11
-    ; idx 13-16: Pipe 1 columns 16-19
-    ; idx 17-24: Cloud zone B columns 20-27
-    ; idx 25-26: Draw clouds
-    ; idx 27: Mark done
+    ; idx 5-16: Clear zone A columns 4-15 (between pipe 0 and pipe 1)
+    ; idx 17-20: Pipe 1 columns 16-19
+    ; idx 21-32: Clear zone B columns 20-31 (after pipe 1)
+    ; idx 33: Mark done
     cmp #1
     bcc @draw_attrs       ; 0: Draw pipe attrs first
     cmp #5
     bcc @pipe0_col        ; 1-4: Pipe 0
-    cmp #13
-    bcc @cloud_a_col      ; 5-12: Cloud zone A
     cmp #17
-    bcc @pipe1_col        ; 13-16: Pipe 1
-    cmp #25
-    bcc @cloud_b_col      ; 17-24: Cloud zone B
-    cmp #26
-    bcc @draw_cloud_1     ; 25: Draw cloud 1
-    beq @draw_cloud_2     ; 26: Draw cloud 2
-    jmp @mark_done        ; 27: Mark done
+    bcc @clear_a_col      ; 5-16: Clear zone A
+    cmp #21
+    bcc @pipe1_col        ; 17-20: Pipe 1
+    cmp #33
+    bcc @clear_b_col      ; 21-32: Clear zone B
+    jmp @mark_done        ; 33: Mark done
 
 ;---------------------------------------
-; Draw pipe attributes (idx 0) - FIRST before any tiles
+; Attributes (idx 0) - Restore title text attribute for NT0
 ;---------------------------------------
+; NT0 had attr row 3, byte 4 set to $FF for title text palette.
+; Restore to $AA (pipe palette) now that text has scrolled off.
 @draw_attrs:
-    bit PPU_STATUS        ; Reset PPU latch
     lda col_nt_base
-    sta nt_base
-    jsr draw_pipe0_attrs_only
-    jsr draw_pipe1_attrs_only
+    cmp #$20              ; Is this NT0?
+    bne @next_column      ; No, skip (NT1 never had title text)
+
+    ; Restore $23DC to $AA (pipe palette)
+    lda #$23
+    sta PPU_ADDR
+    lda #$DC
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
     jmp @next_column
 
 ;---------------------------------------
@@ -1637,23 +1694,19 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Cloud zone A (idx 5-12 -> cols 4-11)
+; Skip zone A (idx 5-16 -> cols 4-15)
+; Don't clear - preserve background decorations
 ;---------------------------------------
-@cloud_a_col:
-    ; Column = col_draw_idx - 1 (idx 5->col 4, idx 12->col 11)
-    sec
-    sbc #1
-    sta pipe_col
-    jsr draw_empty_column
+@clear_a_col:
     jmp @next_column
 
 ;---------------------------------------
-; Pipe 1 columns (idx 13-16 -> cols 16-19)
+; Pipe 1 columns (idx 17-20 -> cols 16-19)
 ;---------------------------------------
 @pipe1_col:
-    ; Column = col_draw_idx + 3 (idx 13->col 16, idx 14->col 17, etc.)
-    clc
-    adc #3
+    ; Column = col_draw_idx - 1 (idx 17->col 16, idx 20->col 19)
+    sec
+    sbc #1
     sta pipe_col
     lda col_pipe1_gap
     sta pipe_gap
@@ -1661,67 +1714,14 @@ draw_column:
     jmp @next_column
 
 ;---------------------------------------
-; Cloud zone B (idx 17-24 -> cols 20-27)
+; Skip zone B (idx 21-32 -> cols 20-31)
+; Don't clear - preserve background decorations
 ;---------------------------------------
-@cloud_b_col:
-    ; Column = col_draw_idx + 3 (idx 17->col 20, idx 24->col 27)
-    clc
-    adc #3
-    sta pipe_col
-    jsr draw_empty_column
+@clear_b_col:
     jmp @next_column
 
 ;---------------------------------------
-; Draw cloud 1 (idx 25)
-; Pick random pattern, store offset, draw first cloud
-;---------------------------------------
-@draw_cloud_1:
-    bit PPU_STATUS        ; Reset PPU latch
-    lda col_nt_base
-    sta nt_base
-    ; Pick random pattern (0-15) and calculate offset
-    jsr rand_lfsr
-    lda rng_hi
-    and #$0F              ; 0-15
-    sta cloud_temp
-    asl a                 ; *2
-    clc
-    adc cloud_temp        ; *3
-    asl a                 ; *6
-    sta cloud_pattern_ofs ; Store for next frame
-    tax
-    ; Draw cloud 1 if it exists
-    lda cloud_patterns, x
-    beq @next_column      ; col=0 means no cloud
-    sta cloud_col
-    lda cloud_patterns+1, x
-    sta cloud_size
-    lda cloud_patterns+2, x
-    sta cloud_row
-    jsr draw_one_cloud
-    jmp @next_column
-
-;---------------------------------------
-; Draw cloud 2 (idx 26)
-;---------------------------------------
-@draw_cloud_2:
-    bit PPU_STATUS        ; Reset PPU latch
-    lda col_nt_base
-    sta nt_base
-    ; Draw cloud 2 using stored pattern offset
-    ldx cloud_pattern_ofs
-    lda cloud_patterns+3, x
-    beq @next_column      ; col=0 means no cloud
-    sta cloud_col
-    lda cloud_patterns+4, x
-    sta cloud_size
-    lda cloud_patterns+5, x
-    sta cloud_row
-    jsr draw_one_cloud
-    jmp @next_column
-
-;---------------------------------------
-; Mark done (idx 27)
+; Mark done (idx 33)
 ;---------------------------------------
 @mark_done:
     lda #$FF
@@ -1882,16 +1882,15 @@ draw_empty_column:
 start_column_redraw:
     sta col_nt_base
 
-    ; Mark NT as having pipes (for collision detection)
+    ; Mark NT0 as having pipes (for collision detection)
+    ; NT1 always has pipes, NT0 gets them after first wrap
     cmp #$24
-    beq @nt1_setup
-    ; NT0 setup
+    beq @gen_gaps         ; NT1 - skip to gap generation
+
+    ; NT0 - mark as having pipes
     lda #1
     sta nt0_has_pipes
-    jmp @gen_gaps
-
-@nt1_setup:
-    ; NT1 (no special flag needed, always has pipes)
+    ; (Attributes already set at init - no PPU writes needed here)
 
 @gen_gaps:
     ; Generate random gap for pipe 0
@@ -2038,8 +2037,7 @@ draw_pipes_in_nt:
     rts
 
 @frame3:
-    ; Frame 3: Draw pipe 0 attrs
-    jsr draw_pipe0_attrs_only
+    ; Frame 3: Attrs now static (loaded at init), just gen next gap
     jsr next_pipe_gap
     lda #4
     sta pipe_redraw
@@ -2073,10 +2071,8 @@ draw_pipes_in_nt:
     rts
 
 @frame6:
-    ; Frame 6: Draw pipe 1 bottom
+    ; Frame 6: Draw pipe 1 bottom (attrs now static)
     jsr draw_pipe_bottom
-    ; Draw pipe 1 attrs (combine with frame 6)
-    jsr draw_pipe1_attrs_only
     lda #7
     sta pipe_redraw
     rts
@@ -2280,441 +2276,500 @@ set_row_ppu_addr:
     sta PPU_ADDR
     rts
 
-;---------------------------------------
-; Draw attributes for pipe 0 only (column 0)
-; Sets all rows 0-5 to pipe palette, row 6 to pipe/ground
-;---------------------------------------
-draw_pipe0_attrs_only:
-    lda nt_base
-    clc
-    adc #3
-    sta nt_base           ; attr base
-
-    ; Attr rows 0-5: pipe palette ($AA)
-    lda nt_base
-    sta PPU_ADDR
-    lda #$C0              ; Row 0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$C8              ; Row 1
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$D0              ; Row 2
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$D8              ; Row 3
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$E0              ; Row 4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$E8              ; Row 5
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    ; Attr row 6: pipe/ground ($5A)
-    lda nt_base
-    sta PPU_ADDR
-    lda #$F0              ; Row 6
-    sta PPU_ADDR
-    lda #$5A
-    sta PPU_DATA
-
-    ; Restore nt_base
-    lda nt_base
-    sec
-    sbc #3
-    sta nt_base
-    rts
-
-;---------------------------------------
-; Draw attributes for pipe 1 only (column 4)
-; Sets all rows 0-5 to pipe palette, row 6 to pipe/ground
-;---------------------------------------
-draw_pipe1_attrs_only:
-    lda nt_base
-    clc
-    adc #3
-    sta nt_base           ; attr base
-
-    ; Attr rows 0-5: pipe palette ($AA)
-    lda nt_base
-    sta PPU_ADDR
-    lda #$C4              ; Row 0
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$CC              ; Row 1
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$D4              ; Row 2
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$DC              ; Row 3
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$E4              ; Row 4
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    lda nt_base
-    sta PPU_ADDR
-    lda #$EC              ; Row 5
-    sta PPU_ADDR
-    lda #$AA
-    sta PPU_DATA
-
-    ; Attr row 6: pipe/ground ($5A)
-    lda nt_base
-    sta PPU_ADDR
-    lda #$F4              ; Row 6
-    sta PPU_ADDR
-    lda #$5A
-    sta PPU_DATA
-
-    ; Restore nt_base
-    lda nt_base
-    sec
-    sbc #3
-    sta nt_base
-    rts
-
 ;===============================================================================
-; Pattern-Based Cloud Drawing
-; Called during init to draw clouds from curated patterns
+; Background Loading Routines
+;===============================================================================
+; Loads a background (1024 bytes) from ROM to a nametable.
+; Each background includes 960 tile bytes + 64 attribute bytes.
+;
+; Usage:
+;   lda #0              ; background index
+;   sta bg_index
+;   lda #$20            ; target nametable ($20=NT0, $24=NT1)
+;   jsr load_background
+;
+; Or to cycle through backgrounds:
+;   jsr next_background
 ;===============================================================================
 
-; Cloud width lookup table (indexed by cloud_size)
-cloud_widths:
-    .byte 4, 6, 8         ; single=4, double=6, triple=8
-
-; Cloud patterns: 16 patterns x 6 bytes each
-; Format: col1, size1, row1, col2, size2, row2
-; col=0 means no cloud, col=4-11 is zone A, col=20-27 is zone B
-PATTERN_COUNT = 16
-cloud_patterns:
-    ; 0: Empty - clear sky
-    .byte 0, 0, 0,    0, 0, 0
-    ; 1: Single high (A)
-    .byte 5, 0, 2,    0, 0, 0
-    ; 2: Single low (B)
-    .byte 22, 0, 7,   0, 0, 0
-    ; 3: Double mid (A)
-    .byte 4, 1, 5,    0, 0, 0
-    ; 4: Triple high (B)
-    .byte 20, 2, 3,   0, 0, 0
-    ; 5: Single + Single (different heights)
-    .byte 6, 0, 3,    24, 0, 6
-    ; 6: Single + Double
-    .byte 7, 0, 4,    20, 1, 6
-    ; 7: Double + Single
-    .byte 4, 1, 3,    25, 0, 7
-    ; 8: Triple + Single
-    .byte 4, 2, 4,    25, 0, 2
-    ; 9: Single + Triple
-    .byte 8, 0, 2,    20, 2, 5
-    ; 10: Double + Double
-    .byte 5, 1, 3,    21, 1, 6
-    ; 11: Single low (A) - variation
-    .byte 6, 0, 6,    0, 0, 0
-    ; 12: Single high (B) - variation
-    .byte 23, 0, 2,   0, 0, 0
-    ; 13: Double (B)
-    .byte 21, 1, 4,   0, 0, 0
-    ; 14: Triple (A)
-    .byte 4, 2, 5,    0, 0, 0
-    ; 15: Single + Single (both high)
-    .byte 5, 0, 2,    23, 0, 3
-
 ;---------------------------------------
-; Draw clouds from random pattern
-; Input: nt_base = $20 (NT0) or $24 (NT1)
+; Start Multi-Frame Background Load
+; Queues background for loading across multiple vblanks (no flash)
+; Input: bg_index already set, A = nametable base ($20 or $24)
 ;---------------------------------------
-draw_random_clouds:
-    ; Pick random pattern (0-15)
-    jsr rand_lfsr
-    lda rng_hi            ; Use high byte (more entropy)
-    and #$0F              ; 0-15
-
-    ; Calculate pattern offset (pattern * 6)
-    sta cloud_temp
-    asl a                 ; *2
-    clc
-    adc cloud_temp        ; *3
-    asl a                 ; *6
-    tax                   ; X = pattern offset
-
-    ; Draw cloud 1 (if col != 0)
-    lda cloud_patterns, x
-    beq @skip_cloud1      ; col=0 means no cloud
-    sta cloud_col
-    lda cloud_patterns+1, x
-    sta cloud_size
-    lda cloud_patterns+2, x
-    sta cloud_row
-    txa
-    pha                   ; Save pattern offset
-    jsr draw_one_cloud
-    pla
-    tax                   ; Restore pattern offset
-
-@skip_cloud1:
-    ; Draw cloud 2 (if col != 0)
-    lda cloud_patterns+3, x
-    beq @done             ; col=0 means no cloud
-    sta cloud_col
-    lda cloud_patterns+4, x
-    sta cloud_size
-    lda cloud_patterns+5, x
-    sta cloud_row
-    jsr draw_one_cloud
-
-@done:
+load_bg_safe:
+    sta bg_load_nt        ; Store target nametable
+    lda #0
+    sta bg_load_row       ; Start loading from row 0
     rts
 
 ;---------------------------------------
-; Draw one cloud at cloud_col, cloud_row
-; Uses cloud_size for width
+; Load Background Rows (called from NMI)
+; Loads 1 row per frame, skipping pipe columns (0-3 and 16-19)
+; This prevents overwriting pipe tiles during parallel loading
 ;---------------------------------------
-draw_one_cloud:
-    ; Row 0: top bumps ($00 $3A $3B ... $00)
-    lda cloud_row
-    ldx cloud_col
-    jsr set_cloud_ppu_addr
-    jsr write_cloud_row0
+load_bg_rows:
+    lda bg_load_row
+    cmp #$FF
+    bne @active
+    rts                   ; Idle, nothing to do
 
-    ; Row 1: middle body ($3C $3D ... $3E)
-    lda cloud_row
+@active:
+    ; Setup source pointer: bg_table[bg_index] + bg_load_row * 32
+    ldx bg_index
+    lda bg_table_lo, x
+    sta $FE
+    lda bg_table_hi, x
+    sta $FF
+
+    ; Add row offset (bg_load_row * 32)
+    lda bg_load_row
+    lsr a                 ; row / 2
+    lsr a                 ; row / 4
+    lsr a                 ; row / 8 (high byte contribution)
     clc
-    adc #1
-    ldx cloud_col
-    jsr set_cloud_ppu_addr
-    jsr write_cloud_row1
+    adc $FF
+    sta $FF               ; Adjust high byte
 
-    ; Row 2: bottom ($3F $40 $41 ... $42)
-    lda cloud_row
+    lda bg_load_row
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; row * 32 (low 8 bits)
     clc
-    adc #2
-    ldx cloud_col
-    jsr set_cloud_ppu_addr
-    jsr write_cloud_row2
+    adc $FE
+    sta $FE
+    bcc @no_carry
+    inc $FF
+@no_carry:
 
+    ; Calculate PPU high byte for this row
+    lda bg_load_nt
+    ldx bg_load_row
+    cpx #8
+    bcc @calc_low
+    clc
+    adc #1                ; Rows 8-15 -> add $100
+    cpx #16
+    bcc @calc_low
+    clc
+    adc #1                ; Rows 16-23 -> add $200
+    cpx #24
+    bcc @calc_low
+    clc
+    adc #1                ; Rows 24-29 -> add $300
+@calc_low:
+    sta $FD               ; Save PPU high byte
+
+    ; Calculate PPU low byte base for this row
+    lda bg_load_row
+    and #$07              ; Row within 256-byte page
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                 ; * 32
+    sta $FC               ; Save PPU low byte base
+
+    ; --- Write columns 4-15 (12 bytes) ---
+    bit PPU_STATUS
+    lda $FD
+    sta PPU_ADDR
+    lda $FC
+    clc
+    adc #4                ; Start at column 4
+    sta PPU_ADDR
+
+    ldy #4                ; Source offset
+@copy_zone_a:
+    lda ($FE), y
+    sta PPU_DATA
+    iny
+    cpy #16               ; Stop at column 16
+    bne @copy_zone_a
+
+    ; --- Write columns 20-31 (12 bytes) ---
+    bit PPU_STATUS
+    lda $FD
+    sta PPU_ADDR
+    lda $FC
+    clc
+    adc #20               ; Start at column 20
+    sta PPU_ADDR
+
+    ldy #20               ; Source offset
+@copy_zone_b:
+    lda ($FE), y
+    sta PPU_DATA
+    iny
+    cpy #32               ; Stop at column 32
+    bne @copy_zone_b
+
+    ; Advance to next row (1 row per frame now)
+    inc bg_load_row
+    lda bg_load_row
+    cmp #30               ; Done with all 30 rows?
+    bcc @not_done
+    lda #$FF              ; Mark as idle
+    sta bg_load_row
+@not_done:
     rts
 
 ;---------------------------------------
-; Set PPU address for cloud drawing
-; A = row, X = column
+; Load Background Tiles Only (no attributes)
+; Input: bg_index = background to load (0 to BG_COUNT-1)
+;        A = nametable base ($20=NT0, $24=NT1)
+; Uses: $FE-$FF as pointer
+; Loads 960 bytes (30 rows x 32 cols)
 ;---------------------------------------
-set_cloud_ppu_addr:
-    pha                   ; Save row
-    lsr a
-    lsr a
-    lsr a                 ; row / 8
-    clc
-    adc nt_base
-    sta PPU_ADDR          ; High byte
+load_background_only:
+    pha                   ; Save nametable base
 
-    pla
-    and #$07
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                 ; (row & 7) * 32
-    stx cloud_temp
-    clc
-    adc cloud_temp        ; + column
-    sta PPU_ADDR          ; Low byte
-    rts
+    ; Setup pointer from table
+    ldx bg_index
+    lda bg_table_lo, x
+    sta $FE               ; pointer low byte
+    lda bg_table_hi, x
+    sta $FF               ; pointer high byte
 
-;---------------------------------------
-; Write cloud row 0 (top bumps)
-; Pattern: $00, ($3A $3B)..., $00
-;---------------------------------------
-write_cloud_row0:
+    ; Set PPU address to target nametable
+    bit PPU_STATUS
+    pla                   ; Restore nametable base
+    sta PPU_ADDR
     lda #$00
-    sta PPU_DATA          ; Left edge
+    sta PPU_ADDR
 
-    ldx cloud_size
-    lda cloud_widths, x
-    sec
-    sbc #2                ; Width minus 2 edges
-    lsr a                 ; Divide by 2 for bump pairs
-    sta cloud_temp        ; Number of bump pairs
-
-@bump_loop:
-    lda #CLOUD_TILE_BASE
+    ; Copy 960 bytes (3 pages + 192 bytes)
+    ; Page 0-2: 768 bytes
+    ldx #3
+    ldy #0
+@load_full_page:
+    lda ($FE), y
     sta PPU_DATA
-    lda #(CLOUD_TILE_BASE + 1)
-    sta PPU_DATA
-    dec cloud_temp
-    bne @bump_loop
-
-    lda #$00
-    sta PPU_DATA          ; Right edge
-    rts
-
-;---------------------------------------
-; Write cloud row 1 (middle body)
-; Pattern: $3C, $3D..., $3E
-;---------------------------------------
-write_cloud_row1:
-    lda #(CLOUD_TILE_BASE + 2)
-    sta PPU_DATA          ; Left edge
-
-    ldx cloud_size
-    lda cloud_widths, x
-    sec
-    sbc #2                ; Width minus 2 edges
-    sta cloud_temp        ; Middle tiles count
-
-@mid_loop:
-    lda #(CLOUD_TILE_BASE + 3)
-    sta PPU_DATA
-    dec cloud_temp
-    bne @mid_loop
-
-    lda #(CLOUD_TILE_BASE + 4)
-    sta PPU_DATA          ; Right edge
-    rts
-
-;---------------------------------------
-; Write cloud row 2 (bottom)
-; Pattern: $3F, ($40 $41)..., $42
-;---------------------------------------
-write_cloud_row2:
-    lda #(CLOUD_TILE_BASE + 5)
-    sta PPU_DATA          ; Left edge
-
-    ldx cloud_size
-    lda cloud_widths, x
-    sec
-    sbc #2                ; Width minus 2 edges
-    lsr a                 ; Divide by 2 for pairs
-    sta cloud_temp
-
-@bot_loop:
-    lda #(CLOUD_TILE_BASE + 6)
-    sta PPU_DATA
-    lda #(CLOUD_TILE_BASE + 7)
-    sta PPU_DATA
-    dec cloud_temp
-    bne @bot_loop
-
-    lda #(CLOUD_TILE_BASE + 8)
-    sta PPU_DATA          ; Right edge
-    rts
-
-;---------------------------------------
-; Clear cloud zone A top half (cols 4-11, rows 2-5)
-; Split to fit in vblank - 4 rows x 8 tiles = 32 tiles
-;---------------------------------------
-clear_cloud_zone_a_top:
-    lda #CLOUD_ZONE_A     ; Column 4
-    sta cloud_col
-    lda #CLOUD_ROW_MIN    ; Row 2
-    ldy #6                ; End before row 6
-    jmp clear_cloud_zone_partial
-
-;---------------------------------------
-; Clear cloud zone A bottom half (cols 4-11, rows 6-10)
-; Split to fit in vblank - 5 rows x 8 tiles = 40 tiles
-;---------------------------------------
-clear_cloud_zone_a_bottom:
-    lda #CLOUD_ZONE_A     ; Column 4
-    sta cloud_col
-    lda #6                ; Row 6
-    ldy #(CLOUD_ROW_MAX + 3)  ; End at row 11
-    jmp clear_cloud_zone_partial
-
-;---------------------------------------
-; Clear cloud zone B top half (cols 20-27, rows 2-5)
-; Split to fit in vblank - 4 rows x 8 tiles = 32 tiles
-;---------------------------------------
-clear_cloud_zone_b_top:
-    lda #CLOUD_ZONE_B     ; Column 20
-    sta cloud_col
-    lda #CLOUD_ROW_MIN    ; Row 2
-    ldy #6                ; End before row 6
-    jmp clear_cloud_zone_partial
-
-;---------------------------------------
-; Clear cloud zone B bottom half (cols 20-27, rows 6-10)
-; Split to fit in vblank - 5 rows x 8 tiles = 40 tiles
-;---------------------------------------
-clear_cloud_zone_b_bottom:
-    lda #CLOUD_ZONE_B     ; Column 20
-    sta cloud_col
-    lda #6                ; Row 6
-    ldy #(CLOUD_ROW_MAX + 3)  ; End at row 11
-    ; Fall through to clear_cloud_zone_partial
-
-;---------------------------------------
-; Clear partial cloud zone
-; A = start row, Y = end row (exclusive)
-; cloud_col must be set before calling
-;---------------------------------------
-clear_cloud_zone_partial:
-    sta cloud_row
-    sty cloud_temp        ; Store end row
-
-@clear_row:
-    ; Set PPU address for this row
-    lda cloud_row
-    ldx cloud_col
-    jsr set_cloud_ppu_addr
-
-    ; Write 8 empty tiles
-    lda #$00
-    ldx #8
-@clear_tile:
-    sta PPU_DATA
+    iny
+    bne @load_full_page
+    inc $FF
     dex
-    bne @clear_tile
+    bne @load_full_page
 
-    ; Next row
-    inc cloud_row
-    lda cloud_row
-    cmp cloud_temp        ; Compare to end row
-    bcc @clear_row
+    ; Remaining 192 bytes (960 - 768 = 192 = $C0)
+    ldy #0
+@load_partial:
+    lda ($FE), y
+    sta PPU_DATA
+    iny
+    cpy #$C0              ; 192 bytes
+    bne @load_partial
 
+    rts
+
+;---------------------------------------
+; Initialize static attribute tables for both nametables
+; Called once at init - never changes during gameplay
+;
+; Layout:
+;   Pipe cols (0, 4): palette 2 ($AA) - pipes
+;   Other cols rows 0-5: palette 3 ($FF) - sky/clouds
+;   Other cols row 6: $F5 (top=pal3 sky, bottom=pal1 ground)
+;   Other cols row 7: palette 1 ($55) - ground
+;---------------------------------------
+init_attributes:
+    ; Set up NT0 attributes
+    lda #$23
+    jsr write_attr_table
+
+    ; Set up NT1 attributes
+    lda #$27
+    jmp write_attr_table
+
+;---------------------------------------
+; Write attribute table for one nametable
+; Input: A = high byte of attr table ($23 or $27)
+;---------------------------------------
+write_attr_table:
+    sta $FF               ; Save high byte
+
+    ; Write 8 rows of attributes
+    ; Each row is 8 bytes, rows are at offsets $C0, $C8, $D0, $D8, $E0, $E8, $F0, $F8
+
+    ; Rows 0-4: pipe cols = $AA (pal 2), others = $00 (pal 0)
+    lda #$C0              ; Starting offset
+    ldx #5                ; 5 rows (0-4)
+@sky_rows:
+    pha                   ; Save offset
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    pla
+    pha
+    sta PPU_ADDR
+    ; Write 8 bytes: $AA, $FF, $FF, $FF, $AA, $FF, $FF, $FF
+    ; Pipe cols use palette 2, sky cols use palette 3 (for clouds)
+    lda #$AA
+    sta PPU_DATA          ; Col 0 (pipe)
+    lda #$FF
+    sta PPU_DATA          ; Col 1 (sky/clouds)
+    sta PPU_DATA          ; Col 2 (sky/clouds)
+    sta PPU_DATA          ; Col 3 (sky/clouds)
+    lda #$AA
+    sta PPU_DATA          ; Col 4 (pipe)
+    lda #$FF
+    sta PPU_DATA          ; Col 5 (sky/clouds)
+    sta PPU_DATA          ; Col 6 (sky/clouds)
+    sta PPU_DATA          ; Col 7 (sky/clouds)
+    pla
+    clc
+    adc #8                ; Next row
+    dex
+    bne @sky_rows
+
+    ; Row 5 ($E8): all $AA (palette 2 for bushes)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$E8
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    ; Row 6 ($F0): $5A (top=pal2 bushes, bottom=pal1 floor)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR
+    lda #$5A
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    ; Row 7 ($F8): all $55 (palette 1 for floor)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$F8
+    sta PPU_ADDR
+    lda #$55
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    rts
+
+;---------------------------------------
+; Advance to Next Background (with wrap)
+; Increments bg_index, wraps at BG_COUNT
+; Then loads the new background into NT0
+;---------------------------------------
+next_background:
+    inc bg_index
+    lda bg_index
+    cmp #BG_COUNT
+    bcc @no_wrap
+    lda #0
+    sta bg_index
+@no_wrap:
+    lda #$20              ; Load into NT0
+    jmp load_background_only
+
+;---------------------------------------
+; Advance next_bg_idx (with wrap)
+; Called after loading a background to prepare for next wrap
+;---------------------------------------
+advance_next_bg:
+    inc next_bg_idx
+    lda next_bg_idx
+    cmp #BG_COUNT
+    bcc @adv_done
+    lda #0
+    sta next_bg_idx
+@adv_done:
+    rts
+
+;===============================================================================
+; MMC1 Write Routines
+;===============================================================================
+mmc1_write_8000:
+    ; Write value in A to MMC1 control register ($8000)
+    ; MMC1 uses a serial interface: write 5 bits, one at a time
+    sta $8000
+    lsr a
+    sta $8000
+    lsr a
+    sta $8000
+    lsr a
+    sta $8000
+    lsr a
+    sta $8000
+    rts
+
+mmc1_write_A000:
+    ; Write value in A to MMC1 CHR bank 0 ($A000)
+    sta $A000
+    lsr a
+    sta $A000
+    lsr a
+    sta $A000
+    lsr a
+    sta $A000
+    lsr a
+    sta $A000
+    rts
+
+mmc1_write_E000:
+    ; Write value in A to MMC1 PRG bank ($E000)
+    sta $E000
+    lsr a
+    sta $E000
+    lsr a
+    sta $E000
+    lsr a
+    sta $E000
+    lsr a
+    sta $E000
+    rts
+
+;===============================================================================
+; Hi-Score Routines
+;===============================================================================
+load_hiscore:
+    ; Load hi-score from SRAM if valid, otherwise initialize to 000
+    ; Check magic bytes
+    lda SRAM_MAGIC_1
+    cmp #SRAM_MAGIC_VAL1
+    bne @init_hiscore
+    lda SRAM_MAGIC_2
+    cmp #SRAM_MAGIC_VAL2
+    bne @init_hiscore
+
+    ; Validate checksum: (H + T + O) XOR $55 should equal stored checksum
+    lda SRAM_HISCORE_H
+    clc
+    adc SRAM_HISCORE_T
+    clc
+    adc SRAM_HISCORE_O
+    eor #$55
+    cmp SRAM_CHECKSUM
+    bne @init_hiscore
+
+    ; Validate digits are 0-9
+    lda SRAM_HISCORE_H
+    cmp #10
+    bcs @init_hiscore
+    lda SRAM_HISCORE_T
+    cmp #10
+    bcs @init_hiscore
+    lda SRAM_HISCORE_O
+    cmp #10
+    bcs @init_hiscore
+
+    ; Valid! Load hi-score to zero page
+    lda SRAM_HISCORE_H
+    sta hiscore_hundreds
+    lda SRAM_HISCORE_T
+    sta hiscore_tens
+    lda SRAM_HISCORE_O
+    sta hiscore_ones
+    rts
+
+@init_hiscore:
+    ; Invalid or first boot - initialize to 000
+    lda #0
+    sta hiscore_ones
+    sta hiscore_tens
+    sta hiscore_hundreds
+    ; Save initial values to SRAM
+    jsr save_hiscore
+    rts
+
+save_hiscore:
+    ; Save hi-score to SRAM with magic bytes and checksum
+    lda #SRAM_MAGIC_VAL1
+    sta SRAM_MAGIC_1
+    lda #SRAM_MAGIC_VAL2
+    sta SRAM_MAGIC_2
+
+    lda hiscore_hundreds
+    sta SRAM_HISCORE_H
+    lda hiscore_tens
+    sta SRAM_HISCORE_T
+    lda hiscore_ones
+    sta SRAM_HISCORE_O
+
+    ; Calculate checksum: (H + T + O) XOR $55
+    lda hiscore_hundreds
+    clc
+    adc hiscore_tens
+    clc
+    adc hiscore_ones
+    eor #$55
+    sta SRAM_CHECKSUM
+    rts
+
+check_update_hiscore:
+    ; Compare current score with hi-score
+    ; If score > hiscore, update hiscore and save
+    ; Compare hundreds first
+    lda score_hundreds
+    cmp hiscore_hundreds
+    bcc @no_update         ; score < hiscore
+    bne @update            ; score > hiscore
+
+    ; Hundreds equal, compare tens
+    lda score_tens
+    cmp hiscore_tens
+    bcc @no_update
+    bne @update
+
+    ; Tens equal, compare ones
+    lda score_ones
+    cmp hiscore_ones
+    bcc @no_update
+    beq @no_update         ; Equal is not a new high score
+
+@update:
+    ; New high score!
+    lda score_ones
+    sta hiscore_ones
+    lda score_tens
+    sta hiscore_tens
+    lda score_hundreds
+    sta hiscore_hundreds
+    jsr save_hiscore
+@no_update:
+    rts
+
+;===============================================================================
+; Hi-Score Display Routines
+;===============================================================================
+update_hiscore_display:
+    ; Hi-score display disabled for now (CHR tiles not ready)
+    ; TODO: Enable display once tiles are added
+    ; Hide all 5 hi-score sprites
+    lda #$FF
+    sta OAM_BUFFER+36     ; Hide 'H'
+    sta OAM_BUFFER+40     ; Hide 'I'
+    sta OAM_BUFFER+44     ; Hide hundreds
+    sta OAM_BUFFER+48     ; Hide tens
+    sta OAM_BUFFER+52     ; Hide ones
     rts
 
 ;===============================================================================
