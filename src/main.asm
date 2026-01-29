@@ -426,6 +426,10 @@ game_loop:
 
     ; Check game state
     lda game_state
+    cmp #STATE_GAME_OVER
+    bne @not_game_over
+    jmp @game_over_state
+@not_game_over:
     cmp #STATE_FADE_OUT
     bne @not_fade_out
     jmp @fade_out_state
@@ -786,8 +790,11 @@ game_loop:
     lda fade_step
     cmp #5                ; 5 steps: 0,1,2,3,4 (4 = fully black)
     bcc @fade_out_apply
-    ; Fully faded to black - do a full reset
-    jmp reset
+    ; Fully faded to black - show game over screen
+    jsr show_game_over_screen
+    lda #STATE_GAME_OVER
+    sta game_state
+    jmp game_loop
 @fade_out_apply:
     lda #1
     sta update_palette    ; Flag to update palette in NMI
@@ -806,6 +813,17 @@ game_loop:
     sta game_state
     ; Title text scrolls off naturally, attr restored when NT0 wraps
 @waiting_done:
+    jmp game_loop
+
+@game_over_state:
+    ; Waiting for player to press START to restart
+    jsr read_controller
+    lda buttons_new
+    and #BUTTON_START
+    beq @game_over_done
+    ; START pressed - full reset
+    jmp reset
+@game_over_done:
     jmp game_loop
 
 nmi:
@@ -1606,6 +1624,363 @@ clear_title_text:
     sta PPU_ADDR
     lda #$AA              ; All quadrants use palette 2
     sta PPU_DATA
+    rts
+
+;===============================================================================
+; Game Over Screen
+;===============================================================================
+show_game_over_screen:
+    ; Disable rendering for safe VRAM access
+    lda #$00
+    sta PPU_MASK
+
+    ; Check if score > hiscore (new record)
+    lda #0
+    sta new_record        ; Assume no new record
+
+    ; Compare hundreds first
+    lda score_hundreds
+    cmp hiscore_hundreds
+    bcc @not_new_record   ; score < hiscore
+    bne @is_new_record    ; score > hiscore
+    ; Hundreds equal, check tens
+    lda score_tens
+    cmp hiscore_tens
+    bcc @not_new_record
+    bne @is_new_record
+    ; Tens equal, check ones
+    lda score_ones
+    cmp hiscore_ones
+    bcc @not_new_record
+    beq @not_new_record   ; Equal is not a new record
+
+@is_new_record:
+    lda #1
+    sta new_record
+    ; Update hiscore
+    lda score_ones
+    sta hiscore_ones
+    lda score_tens
+    sta hiscore_tens
+    lda score_hundreds
+    sta hiscore_hundreds
+    ; Save to SRAM
+    jsr save_hiscore
+
+@not_new_record:
+    ; Clear nametable 0 (fill with empty tiles)
+    bit PPU_STATUS
+    lda #$20
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    tax                   ; X = 0
+    ldy #4                ; 4 pages = 1024 bytes (nametable + attributes)
+    lda #$00              ; Empty tile
+@clear_nt:
+    sta PPU_DATA
+    inx
+    bne @clear_nt
+    dey
+    bne @clear_nt
+
+    ; Set attributes to palette 3 (text palette) for whole screen
+    bit PPU_STATUS
+    lda #$23
+    sta PPU_ADDR
+    lda #$C0
+    sta PPU_ADDR
+    lda #$FF              ; All palette 3
+    ldx #64
+@set_attrs:
+    sta PPU_DATA
+    dex
+    bne @set_attrs
+
+    ; Draw "GAME OVER" at row 8, col 11 = $2000 + 8*32 + 11 = $210B
+    bit PPU_STATUS
+    lda #$21
+    sta PPU_ADDR
+    lda #$0B
+    sta PPU_ADDR
+    lda #$26              ; G
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$2C              ; M
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$35              ; V
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+
+    ; Draw "SCORE" at row 12, col 11 = $2000 + 12*32 + 11 = $218B
+    lda #$21
+    sta PPU_ADDR
+    lda #$8B
+    sta PPU_ADDR
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$22              ; C
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    ; Draw score digits
+    lda score_hundreds
+    clc
+    adc #$10              ; Convert to tile
+    sta PPU_DATA
+    lda score_tens
+    clc
+    adc #$10
+    sta PPU_DATA
+    lda score_ones
+    clc
+    adc #$10
+    sta PPU_DATA
+
+    ; Check if new record
+    lda new_record
+    bne @draw_new_record
+
+    ; --- Normal game over (not new record) ---
+    ; Draw "BEST" at row 14, col 11 = $2000 + 14*32 + 11 = $21CB
+    lda #$21
+    sta PPU_ADDR
+    lda #$CB
+    sta PPU_ADDR
+    lda #$21              ; B
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    ; Draw hiscore digits
+    lda hiscore_hundreds
+    clc
+    adc #$10
+    sta PPU_DATA
+    lda hiscore_tens
+    clc
+    adc #$10
+    sta PPU_DATA
+    lda hiscore_ones
+    clc
+    adc #$10
+    sta PPU_DATA
+
+    ; Draw "NICE TRY!" at row 18, col 11 = $2000 + 18*32 + 11 = $224B
+    lda #$22
+    sta PPU_ADDR
+    lda #$4B
+    sta PPU_ADDR
+    lda #$2D              ; N
+    sta PPU_DATA
+    lda #$28              ; I
+    sta PPU_DATA
+    lda #$22              ; C
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$38              ; Y
+    sta PPU_DATA
+    lda #$48              ; !
+    sta PPU_DATA
+
+    jmp @draw_push_start
+
+@draw_new_record:
+    ; --- New record! ---
+    ; Draw "NEW RECORD!" at row 14, col 10 = $2000 + 14*32 + 10 = $21CA
+    lda #$21
+    sta PPU_ADDR
+    lda #$CA
+    sta PPU_ADDR
+    lda #$2D              ; N
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$36              ; W
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$22              ; C
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$23              ; D
+    sta PPU_DATA
+    lda #$48              ; !
+    sta PPU_DATA
+
+    ; Draw "SHARE IT!" at row 18, col 11 = $2000 + 18*32 + 11 = $224B
+    lda #$22
+    sta PPU_ADDR
+    lda #$4B
+    sta PPU_ADDR
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$27              ; H
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$28              ; I
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$48              ; !
+    sta PPU_DATA
+
+    ; Draw "#FLAPPYPARATROOPA" at row 20, col 7 = $2000 + 20*32 + 7 = $2287
+    lda #$22
+    sta PPU_ADDR
+    lda #$87
+    sta PPU_ADDR
+    lda #$49              ; #
+    sta PPU_DATA
+    lda #$25              ; F
+    sta PPU_DATA
+    lda #$2B              ; L
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$38              ; Y
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+
+@draw_push_start:
+    ; Draw "PUSH START!" at row 24, col 10 = $2000 + 24*32 + 10 = $230A
+    lda #$23
+    sta PPU_ADDR
+    lda #$0A
+    sta PPU_ADDR
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$34              ; U
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$27              ; H
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$48              ; !
+    sta PPU_DATA
+
+    ; Reset scroll
+    bit PPU_STATUS
+    lda #$00
+    sta PPU_SCROLL
+    sta PPU_SCROLL
+
+    ; Restore palette for text display (need white text on black)
+    ; Set palette 3 to: black bg, white text
+    bit PPU_STATUS
+    lda #$3F
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    ; Universal background = black
+    lda #$0F
+    sta PPU_DATA
+
+    ; Skip to palette 3 (offset $0D)
+    lda #$3F
+    sta PPU_ADDR
+    lda #$0D
+    sta PPU_ADDR
+    lda #$0F              ; Black
+    sta PPU_DATA
+    lda #$30              ; White
+    sta PPU_DATA
+    lda #$30              ; White
+    sta PPU_DATA
+    lda #$30              ; White
+    sta PPU_DATA
+
+    ; Enable rendering
+    lda #%00001010        ; Show background only (no sprites)
+    sta PPU_MASK
+
+    ; Set PPUCTRL for NMI
+    lda #%10010000
+    sta PPU_CTRL
+
     rts
 
 ;===============================================================================

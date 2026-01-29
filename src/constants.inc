@@ -59,8 +59,8 @@ SCORE_X_ONES     = 128  ; X position of ones digit
 sound_timer     = $1D   ; Frames until next sound state
 sound_state     = $1E   ; 0=idle, 1=coin B5, 2=coin E6
 
-; Title text
-clear_title     = $1F   ; Set to 1 to clear title text in NMI
+; Game over screen
+new_record      = $1F   ; Flag: 1 = player beat hi-score
 
 ; Death sequence variables
 bird_x          = $20   ; Bird X position (for walk-off)
@@ -135,12 +135,13 @@ GAP_MIN     = 4         ; Minimum gap row
 GAP_MAX     = 15        ; Maximum gap row
 
 ; Game state constants
-STATE_WAITING  = 0      ; Waiting for player to press A/B
-STATE_PLAYING  = 1      ; Active gameplay
-STATE_DYING    = 2      ; Shell falling after collision
-STATE_STUNNED  = 3      ; Recovering after hitting ground
-STATE_WALK_OFF = 4      ; Walking left off screen
-STATE_FADE_OUT = 5      ; Fading to black, then full reset
+STATE_WAITING   = 0     ; Waiting for player to press A/B
+STATE_PLAYING   = 1     ; Active gameplay
+STATE_DYING     = 2     ; Shell falling after collision
+STATE_STUNNED   = 3     ; Recovering after hitting ground
+STATE_WALK_OFF  = 4     ; Walking left off screen
+STATE_FADE_OUT  = 5     ; Fading to black
+STATE_GAME_OVER = 6     ; Showing game over screen, waiting for START
 
 ; Stun timing
 STUN_DELAY     = 75     ; Frames to wait before walking (~1.25 sec)
