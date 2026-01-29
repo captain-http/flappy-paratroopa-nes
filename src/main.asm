@@ -1634,40 +1634,9 @@ show_game_over_screen:
     lda #$00
     sta PPU_MASK
 
-    ; Check if score > hiscore (new record)
-    lda #0
-    sta new_record        ; Assume no new record
+    ; Note: new_record flag was already set by check_update_hiscore
+    ; when the bird hit pipe/ground
 
-    ; Compare hundreds first
-    lda score_hundreds
-    cmp hiscore_hundreds
-    bcc @not_new_record   ; score < hiscore
-    bne @is_new_record    ; score > hiscore
-    ; Hundreds equal, check tens
-    lda score_tens
-    cmp hiscore_tens
-    bcc @not_new_record
-    bne @is_new_record
-    ; Tens equal, check ones
-    lda score_ones
-    cmp hiscore_ones
-    bcc @not_new_record
-    beq @not_new_record   ; Equal is not a new record
-
-@is_new_record:
-    lda #1
-    sta new_record
-    ; Update hiscore
-    lda score_ones
-    sta hiscore_ones
-    lda score_tens
-    sta hiscore_tens
-    lda score_hundreds
-    sta hiscore_hundreds
-    ; Save to SRAM
-    jsr save_hiscore
-
-@not_new_record:
     ; Clear nametable 0 (fill with empty tiles)
     bit PPU_STATUS
     lda #$20
@@ -3104,7 +3073,9 @@ save_hiscore:
 
 check_update_hiscore:
     ; Compare current score with hi-score
-    ; If score > hiscore, update hiscore and save
+    ; If score > hiscore, update hiscore, save, and set new_record flag
+    lda #0
+    sta new_record            ; Assume no new record
     ; Compare hundreds first
     lda score_hundreds
     cmp hiscore_hundreds
@@ -3125,6 +3096,8 @@ check_update_hiscore:
 
 @update:
     ; New high score!
+    lda #1
+    sta new_record            ; Set flag for game over screen
     lda score_ones
     sta hiscore_ones
     lda score_tens
