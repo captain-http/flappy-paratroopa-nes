@@ -68,19 +68,45 @@ fade_timer      = $21   ; Frames until next fade step
 fade_step       = $22   ; Current fade level (0=normal, 4=black)
 update_palette  = $23   ; Flag to update palette in NMI
 
-; Cloud drawing variables (used during init)
-cloud_col       = $24   ; Current cloud starting column
-cloud_row       = $25   ; Current cloud starting row
-cloud_size      = $26   ; Cloud size (0=single/4, 1=double/6, 2=triple/8)
-cloud_temp      = $27   ; Temporary variable
-
 ; Column-based drawing variables
 col_draw_idx    = $28   ; Current column index (0-25, $FF=idle)
 col_nt_base     = $29   ; Nametable being redrawn ($20=NT0, $24=NT1)
 col_pipe0_gap   = $2A   ; Gap row for pipe 0 being drawn
 col_pipe1_gap   = $2B   ; Gap row for pipe 1 being drawn
-cloud_pattern_ofs = $2C ; Cloud pattern offset (stored between frames 24-25)
-col_buffer_ready = $2D  ; Flag: 1 = pipe column buffer filled, ready for NMI
+col_buffer_ready = $2C  ; Flag: 1 = pipe column buffer filled, ready for NMI
+bg_index         = $31  ; Current background index (0 to BG_COUNT-1)
+next_bg_idx      = $32  ; Next background to load when nametable wraps
+
+; Multi-frame background loading
+bg_load_row     = $33   ; Current row being loaded (0-29, $FF=idle)
+bg_load_nt      = $34   ; Target nametable high byte ($20 or $24)
+
+; Hi-score variables (zero page)
+hiscore_ones     = $2E  ; Hi-score ones digit (0-9)
+hiscore_tens     = $2F  ; Hi-score tens digit (0-9)
+hiscore_hundreds = $30  ; Hi-score hundreds digit (0-9)
+
+; SRAM addresses for hi-score persistence
+SRAM_MAGIC_1    = $6000 ; Magic byte 1 ($F1)
+SRAM_MAGIC_2    = $6001 ; Magic byte 2 ($AB)
+SRAM_HISCORE_H  = $6002 ; Hundreds digit
+SRAM_HISCORE_T  = $6003 ; Tens digit
+SRAM_HISCORE_O  = $6004 ; Ones digit
+SRAM_CHECKSUM   = $6005 ; Checksum: (H + T + O) XOR $55
+
+; SRAM magic values
+SRAM_MAGIC_VAL1 = $F1
+SRAM_MAGIC_VAL2 = $AB
+
+; Hi-score display constants
+HISCORE_Y        = 32   ; Y position of hi-score display
+HISCORE_LABEL_X1 = 96   ; X position of 'H' label
+HISCORE_LABEL_X2 = 104  ; X position of 'I' label
+HISCORE_X_HUNDREDS = 112 ; X position of hundreds digit
+HISCORE_X_TENS     = 120 ; X position of tens digit
+HISCORE_X_ONES     = 128 ; X position of ones digit
+TILE_H           = $27  ; Tile for 'H' (A=$20, so H=$27)
+TILE_I           = $28  ; Tile for 'I'
 
 ; Pipe column tile buffer (26 bytes at $0300-$0319)
 ; Pre-filled in main loop, copied to PPU during NMI
@@ -101,18 +127,6 @@ FADE_DELAY      = 15    ; Frames per fade step
 
 ; Alphabet tiles (background pattern table)
 ALPHA_TILE_BASE = $20   ; A=$20, B=$21, ... Z=$39
-
-; Cloud tiles (background pattern table)
-CLOUD_TILE_BASE = $3A   ; Cloud tiles at $3A-$42
-
-; Cloud layout constants
-CLOUD_ROW_MIN   = 2     ; Minimum cloud row (near top)
-CLOUD_ROW_MAX   = 8     ; Maximum cloud row (above ground)
-CLOUD_ZONE_A    = 4     ; Zone A start column (cols 4-11, before pipes)
-CLOUD_ZONE_B    = 20    ; Zone B start column (cols 20-27, after pipe 0)
-
-; Cloud sizes (width in tiles)
-; Single = 4 tiles, Double = 6 tiles, Triple = 8 tiles
 
 ; Pipe layout constants
 DEFAULT_GAP = 12        ; Default gap row

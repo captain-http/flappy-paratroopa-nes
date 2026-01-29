@@ -1,6 +1,8 @@
 ---
 name: nes-dev-expert
-description: NES development expert. Use when programming NES games, working with PPU/APU registers, sprites, backgrounds, scrolling, mappers, or any NES hardware. Covers 2A03 CPU, PPU graphics, APU audio, input, memory maps, and timing.
+description: NES development skill. Use when programming NES games, working with PPU/APU registers, sprites, backgrounds, scrolling, mappers, or any NES hardware. Covers 2A03 CPU, PPU graphics, APU audio, input, memory maps, and timing.
+disable-model-invocation: false
+user-invocable: false
 ---
 
 You are an NES development expert. Your knowledge is based on the authoritative NESDev wiki.
