@@ -1666,11 +1666,11 @@ show_game_over_screen:
     dex
     bne @set_attrs
 
-    ; Draw "GAME OVER" at row 7, col 11 = $2000 + 7*32 + 11 = $20EB
+    ; Draw "GAME OVER" at row 6, col 11 = $2000 + 6*32 + 11 = $20CB
     bit PPU_STATUS
     lda #$20
     sta PPU_ADDR
-    lda #$EB
+    lda #$CB
     sta PPU_ADDR
     lda #$26              ; G
     sta PPU_DATA
@@ -1691,11 +1691,10 @@ show_game_over_screen:
     lda #$31              ; R
     sta PPU_DATA
 
-    ; Draw "SCORE  XXX" at row 12, col 11 = $2000 + 12*32 + 11 = $218B
-    ; BG digit tiles at $50-$59
+    ; Draw "SCORE XXX" at row 11, col 11 = $2000 + 11*32 + 11 = $216B
     lda #$21
     sta PPU_ADDR
-    lda #$8B
+    lda #$6B
     sta PPU_ADDR
     lda #$32              ; S
     sta PPU_DATA
@@ -1706,8 +1705,6 @@ show_game_over_screen:
     lda #$31              ; R
     sta PPU_DATA
     lda #$24              ; E
-    sta PPU_DATA
-    lda #$00              ; (space)
     sta PPU_DATA
     lda #$00              ; (space)
     sta PPU_DATA
@@ -1724,17 +1721,15 @@ show_game_over_screen:
     adc #$50
     sta PPU_DATA
 
-    ; Check if new record
+    ; Branch for middle section
     lda new_record
-    beq @draw_normal
-    jmp @draw_new_record
+    bne @draw_new_record
 
-@draw_normal:
-    ; --- Normal game over (not new record) ---
-    ; Draw "BEST   XXX" at row 14, col 11 = $2000 + 14*32 + 11 = $21CB
+    ; --- Normal: draw BEST and NICE TRY! ---
+    ; Draw "BEST  XXX" at row 13, col 11 = $2000 + 13*32 + 11 = $21AB
     lda #$21
     sta PPU_ADDR
-    lda #$CB
+    lda #$AB
     sta PPU_ADDR
     lda #$21              ; B
     sta PPU_DATA
@@ -1743,8 +1738,6 @@ show_game_over_screen:
     lda #$32              ; S
     sta PPU_DATA
     lda #$33              ; T
-    sta PPU_DATA
-    lda #$00              ; (space)
     sta PPU_DATA
     lda #$00              ; (space)
     sta PPU_DATA
@@ -1763,10 +1756,10 @@ show_game_over_screen:
     adc #$50
     sta PPU_DATA
 
-    ; Draw "NICE TRY!" at row 18, col 11 = $2000 + 18*32 + 11 = $224B
+    ; Draw "NICE TRY!" at row 17, col 11 = $2000 + 17*32 + 11 = $222B
     lda #$22
     sta PPU_ADDR
-    lda #$4B
+    lda #$2B
     sta PPU_ADDR
     lda #$2D              ; N
     sta PPU_DATA
@@ -1786,15 +1779,14 @@ show_game_over_screen:
     sta PPU_DATA
     lda #$48              ; !
     sta PPU_DATA
-
-    jmp @draw_push_start
+    jmp @draw_hashtag
 
 @draw_new_record:
-    ; --- New record! ---
-    ; Draw "NEW RECORD!" at row 14, col 10 = $2000 + 14*32 + 10 = $21CA
+    ; --- New record: draw NEW RECORD! and SHARE IT! ---
+    ; Draw "NEW RECORD!" at row 13, col 10 = $2000 + 13*32 + 10 = $21AA
     lda #$21
     sta PPU_ADDR
-    lda #$CA
+    lda #$AA
     sta PPU_ADDR
     lda #$2D              ; N
     sta PPU_DATA
@@ -1819,10 +1811,10 @@ show_game_over_screen:
     lda #$48              ; !
     sta PPU_DATA
 
-    ; Draw "SHARE IT!" at row 18, col 11 = $2000 + 18*32 + 11 = $224B
+    ; Draw "SHARE IT!" at row 17, col 11 = $2000 + 17*32 + 11 = $222B
     lda #$22
     sta PPU_ADDR
-    lda #$4B
+    lda #$2B
     sta PPU_ADDR
     lda #$32              ; S
     sta PPU_DATA
@@ -1843,10 +1835,11 @@ show_game_over_screen:
     lda #$48              ; !
     sta PPU_DATA
 
-    ; Draw "#FLAPPYPARATROOPA" at row 20, col 7 = $2000 + 20*32 + 7 = $2287
+@draw_hashtag:
+    ; Draw "#FLAPPYPARATROOPA" at row 19, col 7 = $2000 + 19*32 + 7 = $2267
     lda #$22
     sta PPU_ADDR
-    lda #$87
+    lda #$67
     sta PPU_ADDR
     lda #$49              ; #
     sta PPU_DATA
@@ -1884,10 +1877,10 @@ show_game_over_screen:
     sta PPU_DATA
 
 @draw_push_start:
-    ; Draw "PUSH START!" at row 24, col 10 = $2000 + 24*32 + 10 = $230A
+    ; Draw "PUSH START" at row 24, col 11 = $2000 + 24*32 + 11 = $230B
     lda #$23
     sta PPU_ADDR
-    lda #$0A
+    lda #$0B
     sta PPU_ADDR
     lda #$2F              ; P
     sta PPU_DATA
@@ -1908,8 +1901,6 @@ show_game_over_screen:
     lda #$31              ; R
     sta PPU_DATA
     lda #$33              ; T
-    sta PPU_DATA
-    lda #$48              ; !
     sta PPU_DATA
 
     ; Reset scroll position and variables
