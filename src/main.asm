@@ -790,10 +790,10 @@ game_loop:
     lda fade_step
     cmp #5                ; 5 steps: 0,1,2,3,4 (4 = fully black)
     bcc @fade_out_apply
-    ; Fully faded to black - show game over screen
-    jsr show_game_over_screen
+    ; Fully faded to black - set state first to prevent NMI drawing
     lda #STATE_GAME_OVER
     sta game_state
+    jsr show_game_over_screen
     jmp game_loop
 @fade_out_apply:
     lda #1
@@ -840,6 +840,11 @@ nmi:
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
 
+    ; Skip drawing during game over screen
+    lda game_state
+    cmp #STATE_GAME_OVER
+    beq @skip_game_drawing
+
     ; Multi-frame background loading (2 rows per frame)
     ; Must run BEFORE draw_column so pipes overwrite bg, not vice versa
     jsr load_bg_rows
@@ -849,24 +854,37 @@ nmi:
 
     ; Check if we need to update palette (fade effect)
     lda update_palette
-    beq @no_palette_update
+    beq @skip_game_drawing
     jsr apply_fade_palette
     lda #0
     sta update_palette
-@no_palette_update:
+@skip_game_drawing:
 
     ; Set scroll position
     bit PPU_STATUS        ; Reset PPU latch
+    lda game_state
+    cmp #STATE_GAME_OVER
+    beq @game_over_scroll
+    ; Normal gameplay scroll
     lda scroll_x
     sta PPU_SCROLL        ; X scroll
     lda #$00
     sta PPU_SCROLL        ; Y scroll (always 0)
-
     ; Set PPU_CTRL with nametable select
     lda #%10010000        ; Base: NMI on, sprites $0000, bg $1000
     ora scroll_nt         ; Add nametable bit
     sta PPU_CTRL
+    jmp @scroll_done
 
+@game_over_scroll:
+    ; Fixed scroll 0,0 for game over screen
+    lda #$00
+    sta PPU_SCROLL
+    sta PPU_SCROLL
+    lda #%10010000        ; NMI on, nametable 0
+    sta PPU_CTRL
+
+@scroll_done:
     ; Signal main loop
     lda #1
     sta nmi_flag
@@ -1630,21 +1648,26 @@ clear_title_text:
 ; Game Over Screen
 ;===============================================================================
 show_game_over_screen:
-    ; Disable rendering for safe VRAM access
+    ; Wait for vblank to finish any pending NMI work
+:   bit PPU_STATUS
+    bpl :-
+
+    ; Disable NMI and rendering for safe VRAM access
     lda #$00
-    sta PPU_MASK
+    sta PPU_CTRL          ; Disable NMI
+    sta PPU_MASK          ; Disable rendering
 
     ; Note: new_record flag was already set by check_update_hiscore
     ; when the bird hit pipe/ground
 
-    ; Clear nametable 0 (fill with empty tiles)
+    ; Clear both nametables (NT0 at $2000, NT1 at $2400)
     bit PPU_STATUS
     lda #$20
     sta PPU_ADDR
     lda #$00
     sta PPU_ADDR
     tax                   ; X = 0
-    ldy #4                ; 4 pages = 1024 bytes (nametable + attributes)
+    ldy #8                ; 8 pages = 2048 bytes (both nametables + attributes)
     lda #$00              ; Empty tile
 @clear_nt:
     sta PPU_DATA
