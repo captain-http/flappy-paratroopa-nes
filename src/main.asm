@@ -430,6 +430,10 @@ game_loop:
     bne @not_game_over
     jmp @game_over_state
 @not_game_over:
+    cmp #STATE_FADE_IN
+    bne @not_fade_in
+    jmp @fade_in_state
+@not_fade_in:
     cmp #STATE_FADE_OUT
     bne @not_fade_out
     jmp @fade_out_state
@@ -821,9 +825,29 @@ game_loop:
     lda buttons_new
     and #BUTTON_START
     beq @game_over_done
-    ; START pressed - full reset
-    jmp reset
+    ; START pressed - restart with fade in
+    jsr restart_game
+    jmp game_loop
 @game_over_done:
+    jmp game_loop
+
+@fade_in_state:
+    ; Fading in from black
+    dec fade_timer
+    bne @fade_in_done
+    ; Timer expired - next fade step
+    lda #FADE_DELAY
+    sta fade_timer
+    dec fade_step
+    bpl @fade_in_apply
+    ; Fully faded in - start waiting state
+    lda #STATE_WAITING
+    sta game_state
+    jmp game_loop
+@fade_in_apply:
+    lda #1
+    sta update_palette    ; Flag to update palette in NMI
+@fade_in_done:
     jmp game_loop
 
 nmi:
@@ -840,10 +864,12 @@ nmi:
     lda #>OAM_BUFFER      ; High byte of $0200
     sta OAM_DMA
 
-    ; Skip drawing during game over screen
+    ; Skip drawing during game over or fade-in
     lda game_state
     cmp #STATE_GAME_OVER
-    beq @skip_game_drawing
+    beq @skip_bg_drawing
+    cmp #STATE_FADE_IN
+    beq @skip_bg_drawing
 
     ; Multi-frame background loading (2 rows per frame)
     ; Must run BEFORE draw_column so pipes overwrite bg, not vice versa
@@ -852,19 +878,22 @@ nmi:
     ; Column-based pipe/cloud drawing (one column per frame)
     jsr draw_column
 
+@skip_bg_drawing:
     ; Check if we need to update palette (fade effect)
     lda update_palette
-    beq @skip_game_drawing
+    beq @skip_palette_update
     jsr apply_fade_palette
     lda #0
     sta update_palette
-@skip_game_drawing:
+@skip_palette_update:
 
     ; Set scroll position
     bit PPU_STATUS        ; Reset PPU latch
     lda game_state
     cmp #STATE_GAME_OVER
-    beq @game_over_scroll
+    beq @fixed_scroll
+    cmp #STATE_FADE_IN
+    beq @fixed_scroll
     ; Normal gameplay scroll
     lda scroll_x
     sta PPU_SCROLL        ; X scroll
@@ -876,8 +905,8 @@ nmi:
     sta PPU_CTRL
     jmp @scroll_done
 
-@game_over_scroll:
-    ; Fixed scroll 0,0 for game over screen
+@fixed_scroll:
+    ; Fixed scroll 0,0 for game over/fade-in
     lda #$00
     sta PPU_SCROLL
     sta PPU_SCROLL
@@ -1962,6 +1991,272 @@ show_game_over_screen:
     sta PPU_MASK
 
     ; Set PPUCTRL for NMI
+    lda #%10010000
+    sta PPU_CTRL
+
+    rts
+
+;===============================================================================
+; Restart Game (soft reset with fade-in)
+;===============================================================================
+restart_game:
+    ; Wait for vblank
+:   bit PPU_STATUS
+    bpl :-
+
+    ; Disable NMI and rendering
+    lda #$00
+    sta PPU_CTRL
+    sta PPU_MASK
+
+    ; Set palette to all black for fade-in start
+    bit PPU_STATUS
+    lda #$3F
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    lda #$0F              ; Black
+    ldx #32
+@black_palette:
+    sta PPU_DATA
+    dex
+    bne @black_palette
+
+    ; Reset game variables
+    lda #0
+    sta score_ones
+    sta score_tens
+    sta score_hundreds
+    sta pipes_scored
+    sta scroll_x
+    sta scroll_nt
+    sta anim_frame
+    sta anim_timer
+    sta bird_y_frac
+    sta bird_vel_lo
+    sta bird_vel_hi
+    sta nt0_has_pipes
+    sta sound_timer
+    sta sound_state
+
+    lda #100
+    sta bird_y
+
+    ; Reset column/background drawing state
+    lda #$FF
+    sta col_draw_idx
+    sta bg_load_row
+
+    ; Load backgrounds
+    lda #0
+    sta bg_index
+    lda #$20
+    jsr load_background_only
+
+    lda #1
+    sta bg_index
+    lda #$24
+    jsr load_background_only
+
+    ; Set up attributes
+    jsr init_attributes
+
+    ; Draw title text
+    jsr draw_title_text
+
+    ; Next background index
+    lda #2
+    sta next_bg_idx
+
+    ; Initialize LFSR if needed
+    lda rng_lo
+    ora rng_hi
+    bne @skip_rng
+    lda #$01
+    sta rng_lo
+    lda #$A5
+    sta rng_hi
+@skip_rng:
+
+    ; Set initial pipe gap
+    jsr next_pipe_gap
+
+    ; Set up bird sprites
+    lda bird_y
+    sta OAM_BUFFER+0
+    sta OAM_BUFFER+4
+    clc
+    adc #8
+    sta OAM_BUFFER+8
+    sta OAM_BUFFER+12
+    clc
+    adc #8
+    sta OAM_BUFFER+16
+    sta OAM_BUFFER+20
+
+    ; Sprite tiles (frame 1)
+    lda #$01
+    sta OAM_BUFFER+1
+    lda #$02
+    sta OAM_BUFFER+5
+    lda #$03
+    sta OAM_BUFFER+9
+    lda #$04
+    sta OAM_BUFFER+13
+    lda #$05
+    sta OAM_BUFFER+17
+    lda #$06
+    sta OAM_BUFFER+21
+
+    ; Sprite attributes (palette 0)
+    lda #$00
+    sta OAM_BUFFER+2
+    sta OAM_BUFFER+6
+    sta OAM_BUFFER+10
+    sta OAM_BUFFER+14
+    sta OAM_BUFFER+18
+    sta OAM_BUFFER+22
+
+    ; Sprite X positions
+    lda #56
+    sta OAM_BUFFER+3
+    sta OAM_BUFFER+11
+    sta OAM_BUFFER+19
+    lda #64
+    sta OAM_BUFFER+7
+    sta OAM_BUFFER+15
+    sta OAM_BUFFER+23
+
+    ; Score display sprites
+    lda #SCORE_Y
+    sta OAM_BUFFER+24
+    sta OAM_BUFFER+28
+    sta OAM_BUFFER+32
+    lda #DIGIT_TILE_BASE
+    sta OAM_BUFFER+25
+    sta OAM_BUFFER+29
+    sta OAM_BUFFER+33
+    lda #$00
+    sta OAM_BUFFER+26
+    sta OAM_BUFFER+30
+    sta OAM_BUFFER+34
+    lda #SCORE_X_HUNDREDS
+    sta OAM_BUFFER+27
+    lda #SCORE_X_TENS
+    sta OAM_BUFFER+31
+    lda #SCORE_X_ONES
+    sta OAM_BUFFER+35
+
+    ; Draw ground in both nametables
+    bit PPU_STATUS
+    lda #$23
+    sta PPU_ADDR
+    lda #$40
+    sta PPU_ADDR
+    ldx #16
+@ground0_r26:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @ground0_r26
+    ldx #16
+@ground0_r27:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @ground0_r27
+    ldx #16
+@ground0_r28:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @ground0_r28
+    ldx #16
+@ground0_r29:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @ground0_r29
+
+    ; NT1 ground
+    lda #$27
+    sta PPU_ADDR
+    lda #$40
+    sta PPU_ADDR
+    ldx #16
+@ground1_r26:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @ground1_r26
+    ldx #16
+@ground1_r27:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @ground1_r27
+    ldx #16
+@ground1_r28:
+    lda #$01
+    sta PPU_DATA
+    lda #$02
+    sta PPU_DATA
+    dex
+    bne @ground1_r28
+    ldx #16
+@ground1_r29:
+    lda #$03
+    sta PPU_DATA
+    lda #$04
+    sta PPU_DATA
+    dex
+    bne @ground1_r29
+
+    ; Draw pipes in NT1
+    lda #$24
+    sta nt_base
+    lda #0
+    sta pipe_redraw
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+    jsr draw_pipes_in_nt
+
+    ; Reset scroll
+    bit PPU_STATUS
+    lda #$00
+    sta PPU_SCROLL
+    sta PPU_SCROLL
+
+    ; Set fade-in state
+    lda #STATE_FADE_IN
+    sta game_state
+    lda #4
+    sta fade_step
+    lda #FADE_DELAY
+    sta fade_timer
+
+    ; Enable rendering
+    lda #%00011110
+    sta PPU_MASK
+
+    ; Enable NMI
     lda #%10010000
     sta PPU_CTRL
 

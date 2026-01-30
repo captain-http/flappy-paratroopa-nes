@@ -142,6 +142,7 @@ STATE_STUNNED   = 3     ; Recovering after hitting ground
 STATE_WALK_OFF  = 4     ; Walking left off screen
 STATE_FADE_OUT  = 5     ; Fading to black
 STATE_GAME_OVER = 6     ; Showing game over screen, waiting for START
+STATE_FADE_IN   = 7     ; Fading in from black after restart
 
 ; Stun timing
 STUN_DELAY     = 75     ; Frames to wait before walking (~1.25 sec)
