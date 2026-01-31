@@ -1,12 +1,12 @@
 # Flappy Paratroopa for NES - Build System
 
 # Project info
-PROJECT = flappy
+PROJECT = flappy-paratroopa
 GAME_NAME = Flappy Paratroopa
 VERSION = v1.0
 
 # ROM filename following No-Intro naming convention:
-# Game Name (Region) (Unl) (Version).nes
+# Title (Region) (Version) (License).nes
 # - (World) = works on all regions (NTSC/PAL)
 # - (Unl) = Unlicensed/homebrew
 REGION = World
@@ -84,7 +84,8 @@ dist: all
 	@ls -lh "$(ROM_DIST)"
 
 # Versioned distribution (includes version tag)
-ROM_DIST_VER = $(BUILD_DIR)/$(GAME_NAME) ($(REGION)) (Unl) ($(VERSION)).nes
+# No-Intro order: Title (Region) (Version) (License)
+ROM_DIST_VER = $(BUILD_DIR)/$(GAME_NAME) ($(REGION)) ($(VERSION)) (Unl).nes
 
 .PHONY: dist-ver
 dist-ver: all

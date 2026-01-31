@@ -1618,6 +1618,19 @@ play_ground_hit:
     sta NOISE_HI
     rts
 
+play_color_tick:
+    ; Quick blip for shell color change
+    lda #%01010110        ; Duty 25%, length enabled, constant vol, vol=6
+    sta SQ2_VOL
+    lda #$00              ; No sweep
+    sta SQ2_SWEEP
+    ; C6 (~1047 Hz): timer = $6A
+    lda #$6A
+    sta SQ2_LO
+    lda #%00011000        ; Length index 3 (2 frames only!), timer high = 0
+    sta SQ2_HI
+    rts
+
 play_firework_sound:
     ; "pu pum pum-pssss" - three hits, last with crash
     ; State: 1=pu, 2=pum, 3=pum+crash, 4=pssss, 5=done
@@ -1945,6 +1958,7 @@ cycle_shell_color:
     lda #1
     sta shell_color_dirty ; Flag NMI to update palette
     jsr save_hiscore      ; Save immediately to SRAM
+    jsr play_color_tick   ; Play gentle feedback sound
     rts
 
 ; Fade palette tables (5 levels: 0=normal, 4=black)
@@ -2279,20 +2293,6 @@ draw_title_text:
     lda #$20              ; A
     sta PPU_DATA
 
-    ; "2026" at row 14, col 14 = $21CE
-    lda #$21
-    sta PPU_ADDR
-    lda #$CE
-    sta PPU_ADDR
-    lda #$52              ; 2
-    sta PPU_DATA
-    lda #$50              ; 0
-    sta PPU_DATA
-    lda #$52              ; 2
-    sta PPU_DATA
-    lda #$56              ; 6
-    sta PPU_DATA
-
     ; "PRESS START" at row 19, col 10 = $226A
     lda #$22
     sta PPU_ADDR
@@ -2436,18 +2436,6 @@ clear_title_text:
     sta PPU_DATA
     dex
     bne @clear_line2
-
-    ; Clear "2026" at row 14, col 14 (4 tiles)
-    lda #$21
-    sta PPU_ADDR
-    lda #$CE
-    sta PPU_ADDR
-    lda #$00
-    ldx #4
-@clear_line3:
-    sta PPU_DATA
-    dex
-    bne @clear_line3
 
     ; Clear "PRESS START" at row 19, col 10 (11 tiles)
     lda #$22
