@@ -208,6 +208,7 @@ reset:
     lda #$FF
     sta col_draw_idx
     sta bg_load_row       ; No background loading in progress
+    sta go_melody_idx     ; Game over melody idle
     ; NT1 gaps will be set by draw_pipes_in_nt during init
     jsr next_pipe_gap     ; Set initial pipe_gap for NT1 pipe 0
 
@@ -432,6 +433,7 @@ game_loop:
     ; Update sound effects
     jsr update_sound
     jsr update_firework_sound
+    jsr update_gameover_melody
 
     ; Check game state
     lda game_state
@@ -545,6 +547,11 @@ game_loop:
     sta fade_timer        ; Reuse fade_timer for stun delay
     jsr switch_to_shell   ; Show shell while stunned
     jsr play_ground_hit   ; Just noise burst (no whistle)
+    ; Play game over melody (if not new record)
+    lda new_record
+    bne :+
+    jsr play_gameover_melody
+:
     ; Update shell Y positions (same as dying state)
     lda bird_y
     clc
@@ -677,6 +684,11 @@ game_loop:
     sta game_state
     lda #STUN_DELAY
     sta fade_timer        ; Reuse fade_timer for stun delay
+    ; Play game over melody (if not new record)
+    lda new_record
+    bne :+
+    jsr play_gameover_melody
+:
 @dying_no_ground:
 
     ; Update shell sprite Y positions (2x2, skip hidden top sprites)
@@ -1384,6 +1396,94 @@ update_firework_sound:
 
 @fw_sound_done:
     rts
+
+;-------------------------------------------------------------------------------
+; Game Over Melody (Koji Kondo SMB style) - plays on non-high-score
+;-------------------------------------------------------------------------------
+play_gameover_melody:
+    ; Start the melody - index 0, first note
+    lda #0
+    sta go_melody_idx
+    lda #1                ; Start immediately
+    sta go_melody_timer
+    ; Disable sweep on both channels
+    lda #$08
+    sta SQ1_SWEEP
+    sta SQ2_SWEEP
+    rts
+
+update_gameover_melody:
+    lda go_melody_idx
+    cmp #$FF              ; $FF = melody done/idle
+    beq @melody_done
+
+    ; Decrement timer
+    dec go_melody_timer
+    bne @melody_done
+
+    ; Timer expired - play next note
+    lda go_melody_idx
+    asl                   ; Multiply by 8 (each entry is 8 bytes)
+    asl
+    asl
+    tax
+
+    ; Read note duration (0 = end of melody)
+    lda gameover_melody_data, x
+    beq @melody_end
+
+    ; Store duration for next note
+    sta go_melody_timer
+
+    ; Read and set Pulse 1 (melody)
+    lda gameover_melody_data+1, x   ; SQ1_LO
+    sta SQ1_LO
+    lda gameover_melody_data+2, x   ; SQ1_HI
+    sta SQ1_HI
+    lda gameover_melody_data+3, x   ; SQ1_VOL
+    sta SQ1_VOL
+
+    ; Read and set Pulse 2 (harmony)
+    lda gameover_melody_data+4, x   ; SQ2_LO
+    sta SQ2_LO
+    lda gameover_melody_data+5, x   ; SQ2_HI
+    sta SQ2_HI
+    lda gameover_melody_data+6, x   ; SQ2_VOL
+    sta SQ2_VOL
+
+    ; Advance to next note
+    inc go_melody_idx
+    jmp @melody_done
+
+@melody_end:
+    ; Silence and mark as done
+    lda #%00010000
+    sta SQ1_VOL
+    sta SQ2_VOL
+    lda #$FF
+    sta go_melody_idx
+
+@melody_done:
+    rts
+
+; Melody data: duration, SQ1_LO, SQ1_HI, SQ1_VOL, SQ2_LO, SQ2_HI, SQ2_VOL, (pad)
+; Koji Kondo style: harmonized, bouncy rhythm, major-to-minor feel
+; C5=$0D5, G4=$1AB, E4=$212, C4=$2A6, A4=$17C, F4=$1F8, D4=$254
+gameover_melody_data:
+    ; "Ba-dum" opening (C5+E4 chord)
+    .byte 8,  $D5, %11111000, %10111110,  $12, %11111010, %10111010, 0  ; C5+E4
+    .byte 4,  $00, %11111000, %00010000,  $00, %11111000, %00010000, 0  ; Rest
+    ; Descending phrase (G4+C4, then E4+G3)
+    .byte 10, $AB, %11111001, %10111100,  $A6, %11111010, %10111000, 0  ; G4+C4
+    .byte 10, $12, %11111010, %10111100,  $56, %11111011, %10111000, 0  ; E4+G3
+    ; Bounce back up (F4+A3)
+    .byte 6,  $F8, %11111001, %10111010,  $F4, %11111010, %10110110, 0  ; F4+A3
+    ; Final descent (E4+C4, D4+B3, C4+G3)
+    .byte 8,  $12, %11111010, %10111000,  $A6, %11111010, %10110110, 0  ; E4+C4
+    .byte 8,  $54, %11111010, %10110110,  $D6, %11111010, %10110100, 0  ; D4+B3
+    .byte 16, $A6, %11111010, %10110100,  $56, %11111011, %10110010, 0  ; C4+G3 (long)
+    ; End
+    .byte 0, 0, 0, 0, 0, 0, 0, 0
 
 play_score_sound:
     ; Mario coin sound: B5 (short) then E6 (short) - fast staccato
@@ -2367,6 +2467,8 @@ restart_game:
     sta sound_state
     sta fw_sound_timer
     sta fw_sound_state
+    lda #$FF
+    sta go_melody_idx     ; Melody idle
 
     lda #100
     sta bird_y

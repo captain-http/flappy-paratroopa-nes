@@ -60,6 +60,8 @@ sound_timer     = $1D   ; Frames until next sound state
 sound_state     = $1E   ; 0=idle, 1=coin B5, 2=coin E6
 fw_sound_state  = $3A   ; Firework sound state (0=idle, 1-6=notes)
 fw_sound_timer  = $3B   ; Firework sound timer
+go_melody_idx   = $3C   ; Game over melody note index
+go_melody_timer = $3D   ; Game over melody timer
 
 ; Game over screen
 new_record      = $1F   ; Flag: 1 = player beat hi-score
