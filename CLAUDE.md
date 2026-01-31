@@ -51,6 +51,50 @@ Wing flapping animation runs during `STATE_PLAYING`:
 - Every `ANIM_SPEED` (8) frames, `anim_frame` toggles between 0 and 6
 - Sprite tile indices = base tile ($01-$06) + `anim_frame` offset
 
+### Title Screen
+
+The title screen features:
+- Fade-in from black on boot
+- Paratroopa flies across screen with gravity/flap physics
+- "FLAPPY PARATROOPA 2026" title text
+- "PRESS START" prompt
+- TOP score display (hi-score from SRAM)
+
+Press START to transition to the waiting screen ("PRESS A OR B TO FLAP!").
+
+### Shell Color Easter Egg
+
+Press SELECT on the title or waiting screen to cycle through 16 shell colors:
+
+| # | Value | Color |
+|---|-------|-------|
+| 1 | $1A | Green (default) |
+| 2 | $16 | Red |
+| 3 | $02 | Dark Blue |
+| 4 | $14 | Purple |
+| 5 | $0F | Black |
+| 6 | $17 | Brown |
+| 7 | $0A | Dark Green |
+| 8 | $06 | Dark Red/Maroon |
+| 9 | $1C | Dark Cyan |
+| 10 | $04 | Dark Purple |
+| 11 | $00 | Dark Gray |
+| 12 | $12 | Medium Blue |
+| 13 | $07 | Dark Brown |
+| 14 | $2A | Bright Green |
+| 15 | $1B | Teal |
+| 16 | $0C | Dark Teal |
+
+Shell color is saved to SRAM immediately on change and persists across power cycles.
+
+**Variables:**
+- `turtle_color` ($3E) - Current shell color index (0-15)
+- `shell_color_dirty` ($3F) - Flag to update palette in NMI
+
+**Key subroutines:**
+- `cycle_shell_color` - Increment color and save to SRAM
+- `update_shell_color` - Write color to PPU palette
+
 ### Death Sequence
 
 When the Koopa dies, it goes through a multi-state animation:
@@ -91,7 +135,7 @@ GAME OVER
 SCORE XXX
 BEST XXX
 NICE TRY!
-PUSH START!
+PRESS START!
 ```
 
 **New high score:**
@@ -101,7 +145,7 @@ SCORE XXX
 NEW RECORD!
 SHARE IT!
 #FLAPPYPARATROOPA
-PUSH START!
+PRESS START!
 ```
 
 **Tiles used:**
@@ -140,6 +184,22 @@ Digit tiles: `$10` = '0', `$11` = '1', ... `$19` = '9'
 ### Debug Script
 
 `scripts/score_display.lua` - FCEUX Lua script that overlays score and game state for debugging.
+
+## SRAM Persistence
+
+Hi-score and shell color are saved to battery-backed SRAM at $6000-$6006:
+
+| Address | Variable | Description |
+|---------|----------|-------------|
+| $6000 | `SRAM_MAGIC_1` | Magic byte 1 ($F1) |
+| $6001 | `SRAM_MAGIC_2` | Magic byte 2 ($AB) |
+| $6002 | `SRAM_HISCORE_H` | Hundreds digit |
+| $6003 | `SRAM_HISCORE_T` | Tens digit |
+| $6004 | `SRAM_HISCORE_O` | Ones digit |
+| $6005 | `SRAM_SHELL_CLR` | Shell color index (0-15) |
+| $6006 | `SRAM_CHECKSUM` | Checksum: (H+T+O+shell) XOR $55 |
+
+Data is validated on load via magic bytes and checksum. Invalid data resets to defaults (score=000, green shell).
 
 ## Sound System
 
@@ -217,7 +277,7 @@ SMB-style fireworks celebrate new high scores on the game over screen.
 
 ### Firework Positions
 
-4 positions symmetric around game over text, cycles once then stops.
+4 positions symmetric around game over text, cycles through 2 rounds (8 total fireworks) then stops.
 
 ### Key Subroutines
 

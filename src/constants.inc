@@ -71,6 +71,13 @@ bird_x          = $20   ; Bird X position (for walk-off)
 fade_timer      = $21   ; Frames until next fade step
 fade_step       = $22   ; Current fade level (0=normal, 4=black)
 update_palette  = $23   ; Flag to update palette in NMI
+fade_target     = $24   ; State to go to after fade-in completes
+dbl_flap_timer  = $25   ; Timer for double-flap on title screen
+flap_threshold  = $26   ; Random Y threshold for auto-flap (80-140)
+clear_top_flag  = $27   ; Flag: 1 = clear TOP XXX in next NMI
+turtle_color    = $3E   ; Shell color index (0-7)
+shell_color_dirty = $3F ; Flag: 1 = update shell color in NMI
+TURTLE_COLOR_COUNT = 16 ; Number of shell color options
 
 ; Column-based drawing variables
 col_draw_idx    = $28   ; Current column index (0-25, $FF=idle)
@@ -78,6 +85,7 @@ col_nt_base     = $29   ; Nametable being redrawn ($20=NT0, $24=NT1)
 col_pipe0_gap   = $2A   ; Gap row for pipe 0 being drawn
 col_pipe1_gap   = $2B   ; Gap row for pipe 1 being drawn
 col_buffer_ready = $2C  ; Flag: 1 = pipe column buffer filled, ready for NMI
+nt0_needs_attrs  = $2D  ; Flag: 1 = NT0 needs gameplay attrs written in NMI
 bg_index         = $31  ; Current background index (0 to BG_COUNT-1)
 next_bg_idx      = $32  ; Next background to load when nametable wraps
 
@@ -96,7 +104,8 @@ SRAM_MAGIC_2    = $6001 ; Magic byte 2 ($AB)
 SRAM_HISCORE_H  = $6002 ; Hundreds digit
 SRAM_HISCORE_T  = $6003 ; Tens digit
 SRAM_HISCORE_O  = $6004 ; Ones digit
-SRAM_CHECKSUM   = $6005 ; Checksum: (H + T + O) XOR $55
+SRAM_SHELL_CLR  = $6005 ; Shell color index (0-7)
+SRAM_CHECKSUM   = $6006 ; Checksum: (H + T + O + shell) XOR $55
 
 ; SRAM magic values
 SRAM_MAGIC_VAL1 = $F1
@@ -107,6 +116,7 @@ fw_timer        = $35   ; Firework animation timer
 fw_frame        = $36   ; Current animation frame (0, 1, 2)
 fw_current      = $37   ; Current firework position index (0-2)
 fw_wait         = $38   ; Wait timer between fireworks
+fw_round        = $39   ; Current firework round (0-2, stops at 3)
 ; Firework constants
 FW_ANIM_SPEED   = 8     ; Frames between animation updates
 FW_WAIT_TIME    = 30    ; Frames to wait between fireworks
@@ -158,14 +168,16 @@ GAP_MIN     = 4         ; Minimum gap row
 GAP_MAX     = 15        ; Maximum gap row
 
 ; Game state constants
-STATE_WAITING   = 0     ; Waiting for player to press A/B
-STATE_PLAYING   = 1     ; Active gameplay
-STATE_DYING     = 2     ; Shell falling after collision
-STATE_STUNNED   = 3     ; Recovering after hitting ground
-STATE_WALK_OFF  = 4     ; Walking left off screen
-STATE_FADE_OUT  = 5     ; Fading to black
-STATE_GAME_OVER = 6     ; Showing game over screen, waiting for START
-STATE_FADE_IN   = 7     ; Fading in from black after restart
+STATE_TITLE     = 0     ; Title screen, waiting for START
+STATE_WAITING   = 1     ; Waiting for player to press A/B
+STATE_PLAYING   = 2     ; Active gameplay
+STATE_DYING     = 3     ; Shell falling after collision
+STATE_STUNNED   = 4     ; Recovering after hitting ground
+STATE_WALK_OFF  = 5     ; Walking left off screen
+STATE_FADE_OUT  = 6     ; Fading to black
+STATE_GAME_OVER = 7     ; Showing game over screen, waiting for START
+STATE_FADE_IN   = 8     ; Fading in from black after restart
+STATE_TITLE_FADE = 9    ; Fading from title to waiting
 
 ; Stun timing
 STUN_DELAY     = 75     ; Frames to wait before walking (~1.25 sec)

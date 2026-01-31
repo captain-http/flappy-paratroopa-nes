@@ -168,8 +168,8 @@ reset:
     lda #$24              ; Target = NT1
     jsr load_background_only
 
-    ; Set up static attribute tables for both nametables (once, never changes)
-    jsr init_attributes
+    ; Set up title screen attributes (all palette 3 for text)
+    jsr init_title_attributes
 
     ; Draw title text on NT0
     jsr draw_title_text
@@ -181,8 +181,10 @@ reset:
     ; Initialize bird state (8.8 fixed-point)
     lda #0
     sta bird_y_frac
-    lda #100
-    sta bird_y
+    sta bird_x            ; Start at left for title animation
+    lda #84
+    sta bird_y            ; Start higher on title screen
+    sta flap_threshold    ; Initial flap threshold
     lda #0
     sta bird_vel_lo
     sta bird_vel_hi
@@ -204,24 +206,22 @@ reset:
     ; NT0 starts empty - flag prevents collision checks until drawn
     lda #0
     sta nt0_has_pipes
+    sta nt0_needs_attrs   ; No pending attr write
+    ; turtle_color already loaded from SRAM by load_hiscore
+    sta shell_color_dirty ; No pending shell color update
     ; Initialize column drawing to idle (no active redraw)
     lda #$FF
     sta col_draw_idx
     sta bg_load_row       ; No background loading in progress
     sta go_melody_idx     ; Game over melody idle
-    ; NT1 gaps will be set by draw_pipes_in_nt during init
-    jsr next_pipe_gap     ; Set initial pipe_gap for NT1 pipe 0
+    ; Pipe gaps will be generated in title_fade_state after player presses START
 
-    ; Initialize sprite Y positions from bird_y (2x3 bird = 6 sprites)
-    lda bird_y
+    ; Initialize sprite Y positions - hidden during fade-in
+    lda #$FF              ; Off-screen (hidden)
     sta OAM_BUFFER+0      ; Top-left Y
     sta OAM_BUFFER+4      ; Top-right Y
-    clc
-    adc #8
     sta OAM_BUFFER+8      ; Mid-left Y
     sta OAM_BUFFER+12     ; Mid-right Y
-    clc
-    adc #8
     sta OAM_BUFFER+16     ; Bottom-left Y
     sta OAM_BUFFER+20     ; Bottom-right Y
 
@@ -258,9 +258,9 @@ reset:
     sta OAM_BUFFER+15
     sta OAM_BUFFER+23
 
-    ; Initialize score display sprites (3 digits)
+    ; Initialize score display sprites (3 digits) - hidden initially
     ; Hundreds digit (OAM_BUFFER+24)
-    lda #SCORE_Y
+    lda #$FF              ; Hidden (Y off screen)
     sta OAM_BUFFER+24     ; Y
     lda #DIGIT_TILE_BASE  ; Tile '0'
     sta OAM_BUFFER+25
@@ -270,7 +270,7 @@ reset:
     sta OAM_BUFFER+27     ; X
 
     ; Tens digit (OAM_BUFFER+28)
-    lda #SCORE_Y
+    lda #$FF              ; Hidden
     sta OAM_BUFFER+28     ; Y
     lda #DIGIT_TILE_BASE  ; Tile '0'
     sta OAM_BUFFER+29
@@ -280,7 +280,7 @@ reset:
     sta OAM_BUFFER+31     ; X
 
     ; Ones digit (OAM_BUFFER+32)
-    lda #SCORE_Y
+    lda #$FF              ; Hidden
     sta OAM_BUFFER+32     ; Y
     lda #DIGIT_TILE_BASE  ; Tile '0'
     sta OAM_BUFFER+33
@@ -383,23 +383,32 @@ reset:
     bne @fill_ground1_row29
 
     ;=========================================================================
-    ; Pipe attributes baked into bg*.asm - no runtime attr writes needed
+    ; Title screen - no pipes drawn yet (drawn during fade to waiting)
     ;=========================================================================
+    ; Pipes will be drawn in NT1 during title_fade_state when screen is black
 
-    ; Draw pipes in NT1 (initial screen is empty NT0)
-    ; Use eight-frame drawing routine (outside vblank, no constraint)
-    lda #$24              ; NT1 base
-    sta nt_base
-    lda #0
-    sta pipe_redraw       ; Start with pipe 0 body+cap
-    jsr draw_pipes_in_nt  ; Frame 1: pipe 0 body+cap
-    jsr draw_pipes_in_nt  ; Frame 2: pipe 0 gap
-    jsr draw_pipes_in_nt  ; Frame 3: pipe 0 bottom
-    jsr draw_pipes_in_nt  ; Frame 4: pipe 0 attrs
-    jsr draw_pipes_in_nt  ; Frame 5: pipe 1 body+cap
-    jsr draw_pipes_in_nt  ; Frame 6: pipe 1 gap
-    jsr draw_pipes_in_nt  ; Frame 7: pipe 1 bottom
-    jsr draw_pipes_in_nt  ; Frame 8: pipe 1 attrs
+    ; Set palette to black for fade-in effect
+    bit PPU_STATUS
+    lda #$3F
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_ADDR
+    lda #$0F              ; Black
+    ldx #32
+@init_black_pal:
+    sta PPU_DATA
+    dex
+    bne @init_black_pal
+
+    ; Set up fade-in to title screen
+    lda #STATE_FADE_IN
+    sta game_state
+    lda #STATE_TITLE
+    sta fade_target
+    lda #4
+    sta fade_step         ; Start fully black
+    lda #FADE_DELAY
+    sta fade_timer
 
     ; Reset scroll position
     bit PPU_STATUS
@@ -465,6 +474,14 @@ game_loop:
     bne @not_waiting
     jmp @waiting_state        ; Waiting for start
 @not_waiting:
+    cmp #STATE_TITLE
+    bne @not_title
+    jmp @title_state          ; Title screen
+@not_title:
+    cmp #STATE_TITLE_FADE
+    bne @not_title_fade
+    jmp @title_fade_state     ; Fading from title to waiting
+@not_title_fade:
 
     ; STATE_PLAYING: Normal gameplay
     jsr read_controller
@@ -625,6 +642,10 @@ game_loop:
     lda pipes_scored
     and #%11111100        ; Clear NT0 scored flags
     sta pipes_scored
+    ; Text tiles will be overwritten by background load
+    ; Attributes will be restored by column redraw (idx 0 = attributes)
+    lda #0
+    sta clear_top_flag    ; Clear flag (no longer needed)
     ; Load next background into NT0
     lda next_bg_idx
     sta bg_index
@@ -825,11 +846,301 @@ game_loop:
     jsr read_controller
     lda buttons_new
     and #(BUTTON_A | BUTTON_B)
-    beq @waiting_done
+    beq @waiting_check_select
+    ; Start playing - apply first flap
+    lda #FLAP_VEL_LO
+    sta bird_vel_lo
+    lda #FLAP_VEL_HI
+    sta bird_vel_hi
+    jsr play_flap_sound
     lda #STATE_PLAYING
     sta game_state
-    ; Title text scrolls off naturally, attr restored when NT0 wraps
-@waiting_done:
+    ; Text will scroll off naturally, cleared when NT0 wraps
+    lda #1
+    sta clear_top_flag        ; Flag to clear text on NT0 wrap
+    jmp game_loop
+@waiting_check_select:
+    ; Check SELECT for shell color easter egg
+    lda buttons_new
+    and #BUTTON_SELECT
+    beq @waiting_animate
+    jsr cycle_shell_color
+@waiting_animate:
+    ; Animate wing flapping while waiting
+    inc anim_timer
+    lda anim_timer
+    cmp #ANIM_SPEED
+    bcc @waiting_no_anim
+    lda #0
+    sta anim_timer
+    ; Toggle frame between 0 and 6
+    lda anim_frame
+    eor #6
+    sta anim_frame
+@waiting_no_anim:
+    ; Update sprite tiles based on animation frame
+    lda anim_frame
+    clc
+    adc #$01
+    sta OAM_BUFFER+1      ; Top-left tile
+    adc #1
+    sta OAM_BUFFER+5      ; Top-right tile
+    adc #1
+    sta OAM_BUFFER+9      ; Mid-left tile
+    adc #1
+    sta OAM_BUFFER+13     ; Mid-right tile
+    adc #1
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    adc #1
+    sta OAM_BUFFER+21     ; Bottom-right tile
+    jmp game_loop
+
+@title_state:
+    ; Title screen - waiting for START
+    ; Run LFSR each frame to gather entropy from player timing
+    jsr rand_lfsr
+    jsr read_controller
+    lda buttons_new
+    and #BUTTON_START
+    beq @title_check_select
+    ; START pressed - fade to waiting state
+    lda #STATE_TITLE_FADE
+    sta game_state
+    lda #0
+    sta fade_step
+    lda #FADE_DELAY
+    sta fade_timer
+    jmp game_loop
+
+@title_check_select:
+    ; Check SELECT for shell color easter egg
+    lda buttons_new
+    and #BUTTON_SELECT
+    beq @title_animate
+    jsr cycle_shell_color
+
+@title_animate:
+    ; Apply gravity to velocity (same as gameplay)
+    lda bird_vel_lo
+    clc
+    adc #GRAVITY
+    sta bird_vel_lo
+    lda bird_vel_hi
+    adc #0
+    sta bird_vel_hi
+
+    ; Apply velocity to position
+    lda bird_y_frac
+    clc
+    adc bird_vel_lo
+    sta bird_y_frac
+    lda bird_y
+    adc bird_vel_hi
+    sta bird_y
+
+    ; Check floor bound
+    cmp #(GROUND_Y-16)    ; Leave room above ground
+    bcc @title_no_floor
+    lda #(GROUND_Y-16)
+    sta bird_y
+    lda #0
+    sta bird_vel_lo
+    sta bird_vel_hi
+@title_no_floor:
+
+    ; Check ceiling bound
+    lda bird_y
+    cmp #(CEILING_Y+24)   ; Don't go too high (leave room for title text)
+    bcs @title_no_ceil
+    lda #(CEILING_Y+24)
+    sta bird_y
+    lda #0
+    sta bird_vel_lo
+    sta bird_vel_hi
+@title_no_ceil:
+
+    ; Random flap - check if below threshold
+    lda bird_y
+    cmp flap_threshold
+    bcc @title_no_flap    ; Above threshold, don't flap
+    ; Below threshold - random chance to flap
+    lda rng_lo
+    and #$07              ; 1 in 8 chance per frame
+    bne @title_no_flap
+    ; Flap! (same physics as gameplay)
+    lda #FLAP_VEL_LO
+    sta bird_vel_lo
+    lda #FLAP_VEL_HI
+    sta bird_vel_hi
+    ; Set new random threshold (64-124) - higher on screen
+    lda rng_hi
+    and #$3F              ; 0-63
+    clc
+    adc #64               ; 64-127
+    cmp #125
+    bcc @title_thresh_ok
+    lda #124
+@title_thresh_ok:
+    sta flap_threshold
+@title_no_flap:
+
+    ; Move bird right
+    inc bird_x
+    lda bird_x
+    cmp #248              ; Off right edge?
+    bcc @title_no_wrap
+    lda #0                ; Wrap to left
+    sta bird_x
+@title_no_wrap:
+
+    ; Wing animation
+    inc anim_timer
+    lda anim_timer
+    cmp #ANIM_SPEED
+    bcc @title_no_anim
+    lda #0
+    sta anim_timer
+    lda anim_frame
+    eor #6
+    sta anim_frame
+@title_no_anim:
+
+    ; Update sprite Y positions
+    lda bird_y
+    sta OAM_BUFFER+0
+    sta OAM_BUFFER+4
+    clc
+    adc #8
+    sta OAM_BUFFER+8
+    sta OAM_BUFFER+12
+    clc
+    adc #8
+    sta OAM_BUFFER+16
+    sta OAM_BUFFER+20
+
+    ; Update sprite X positions
+    lda bird_x
+    sta OAM_BUFFER+3
+    sta OAM_BUFFER+11
+    sta OAM_BUFFER+19
+    clc
+    adc #8
+    sta OAM_BUFFER+7
+    sta OAM_BUFFER+15
+    sta OAM_BUFFER+23
+
+    ; Update sprite tiles
+    lda anim_frame
+    clc
+    adc #$01
+    sta OAM_BUFFER+1
+    adc #1
+    sta OAM_BUFFER+5
+    adc #1
+    sta OAM_BUFFER+9
+    adc #1
+    sta OAM_BUFFER+13
+    adc #1
+    sta OAM_BUFFER+17
+    adc #1
+    sta OAM_BUFFER+21
+
+    jmp game_loop
+
+@title_fade_state:
+    ; Fading out from title to waiting
+    jsr rand_lfsr         ; Continue gathering entropy
+    dec fade_timer
+    beq @title_fade_tick
+    jmp @title_fade_done
+@title_fade_tick:
+    lda #FADE_DELAY
+    sta fade_timer
+    inc fade_step
+    lda fade_step
+    cmp #5
+    bcs @title_fade_black
+    jmp @title_fade_apply
+@title_fade_black:
+    ; Fully faded (screen black) - disable rendering for safe VRAM access
+    lda #$00
+    sta PPU_MASK          ; Disable rendering
+    lda #%10010000
+    sta PPU_CTRL          ; Keep NMI enabled but reset PPU state
+    bit PPU_STATUS        ; Clear PPU latch
+
+    ; Set NT1 to gameplay attributes for pipes (NT0 keeps title attrs for text)
+    ; NT0 will get gameplay attrs when it wraps (via nt0_needs_attrs flag)
+    lda #$27
+    jsr write_attr_table  ; NT1 gameplay attrs
+    ; Generate pipe gaps now (uses entropy from title screen wait time)
+    jsr next_pipe_gap     ; Generate gap for pipe 0
+    ; Draw pipes in NT1
+    lda #$24              ; NT1 base
+    sta nt_base
+    lda #0
+    sta pipe_redraw
+    jsr draw_pipes_in_nt  ; pipe 0 body+cap
+    jsr draw_pipes_in_nt  ; pipe 0 gap
+    jsr draw_pipes_in_nt  ; pipe 0 bottom
+    jsr draw_pipes_in_nt  ; pipe 0 attrs
+    jsr draw_pipes_in_nt  ; pipe 1 body+cap
+    jsr draw_pipes_in_nt  ; pipe 1 gap
+    jsr draw_pipes_in_nt  ; pipe 1 bottom
+    jsr draw_pipes_in_nt  ; pipe 1 attrs
+    ; Clear title text, draw waiting text
+    jsr clear_title_text
+    jsr draw_waiting_text
+
+    ; Reset bird position for waiting screen
+    lda #56
+    sta bird_x
+    lda #100
+    sta bird_y
+    lda #0
+    sta bird_vel_lo
+    sta bird_vel_hi
+
+    ; Update sprite positions for gameplay
+    lda bird_y
+    sta OAM_BUFFER+0
+    sta OAM_BUFFER+4
+    clc
+    adc #8
+    sta OAM_BUFFER+8
+    sta OAM_BUFFER+12
+    clc
+    adc #8
+    sta OAM_BUFFER+16
+    sta OAM_BUFFER+20
+    lda #56
+    sta OAM_BUFFER+3
+    sta OAM_BUFFER+11
+    sta OAM_BUFFER+19
+    lda #64
+    sta OAM_BUFFER+7
+    sta OAM_BUFFER+15
+    sta OAM_BUFFER+23
+
+    ; Reset scroll and re-enable rendering
+    bit PPU_STATUS
+    lda #$00
+    sta PPU_SCROLL
+    sta PPU_SCROLL
+    lda #%00011110
+    sta PPU_MASK          ; Re-enable rendering
+
+    lda #STATE_FADE_IN
+    sta game_state
+    lda #STATE_WAITING
+    sta fade_target           ; After fade-in, go to waiting
+    lda #4
+    sta fade_step             ; Reset for fade-in
+    jmp @title_fade_done      ; Skip applying fade (already black)
+@title_fade_apply:
+    lda #1
+    sta update_palette
+@title_fade_done:
     jmp game_loop
 
 @game_over_state:
@@ -841,7 +1152,8 @@ game_loop:
     lda buttons_new
     and #BUTTON_START
     beq @game_over_done
-    ; START pressed - restart with fade in
+    ; START pressed - save settings and restart with fade in
+    jsr save_hiscore      ; Save shell color (and hi-score)
     jsr restart_game
     jmp game_loop
 @game_over_done:
@@ -849,6 +1161,8 @@ game_loop:
 
 @fade_in_state:
     ; Fading in from black
+    ; Run LFSR to gather entropy from timing
+    jsr rand_lfsr
     dec fade_timer
     bne @fade_in_done
     ; Timer expired - next fade step
@@ -856,8 +1170,8 @@ game_loop:
     sta fade_timer
     dec fade_step
     bpl @fade_in_apply
-    ; Fully faded in - start waiting state
-    lda #STATE_WAITING
+    ; Fully faded in - go to target state
+    lda fade_target
     sta game_state
     jmp game_loop
 @fade_in_apply:
@@ -894,14 +1208,32 @@ nmi:
     ; Column-based pipe/cloud drawing (one column per frame)
     jsr draw_column
 
+    ; Check if NT0 needs gameplay attributes (first wrap from waiting screen)
+    lda nt0_needs_attrs
+    beq @skip_nt0_attrs
+    lda #$23
+    jsr write_attr_table  ; Write gameplay attrs to NT0
+    lda #0
+    sta nt0_needs_attrs   ; Clear flag
+@skip_nt0_attrs:
+
 @skip_bg_drawing:
     ; Check if we need to update palette (fade effect)
     lda update_palette
     beq @skip_palette_update
     jsr apply_fade_palette
+    jsr update_shell_color    ; Restore user's shell color after fade
     lda #0
     sta update_palette
 @skip_palette_update:
+
+    ; Check if shell color changed (easter egg)
+    lda shell_color_dirty
+    beq @skip_shell_update
+    jsr update_shell_color
+    lda #0
+    sta shell_color_dirty
+@skip_shell_update:
 
     ; Set scroll position
     bit PPU_STATUS        ; Reset PPU latch
@@ -1581,6 +1913,40 @@ apply_fade_palette:
 
     rts
 
+;---------------------------------------
+; Update shell color (easter egg)
+; Call this after changing turtle_color
+; Must be called during vblank or with rendering disabled
+;---------------------------------------
+update_shell_color:
+    bit PPU_STATUS
+    lda #$3F
+    sta PPU_ADDR
+    lda #$11              ; Sprite palette 0, color 1 (shell)
+    sta PPU_ADDR
+    ldx turtle_color
+    lda shell_colors, x
+    sta PPU_DATA
+    rts
+
+;---------------------------------------
+; Cycle to next shell color
+; Called when SELECT is pressed on title/waiting screen
+; Sets flag for NMI to update palette
+;---------------------------------------
+cycle_shell_color:
+    inc turtle_color
+    lda turtle_color
+    cmp #TURTLE_COLOR_COUNT
+    bcc @no_wrap
+    lda #0
+    sta turtle_color
+@no_wrap:
+    lda #1
+    sta shell_color_dirty ; Flag NMI to update palette
+    jsr save_hiscore      ; Save immediately to SRAM
+    rts
+
 ; Fade palette tables (5 levels: 0=normal, 4=black)
 ; Background palettes (16 colors x 5 levels = 80 bytes)
 fade_palette_bg:
@@ -1658,6 +2024,26 @@ bg_table_hi:
     .byte >BG0, >BG1, >BG2, >BG3
 
 BG_COUNT = 4    ; 4 backgrounds that loop
+
+; Shell color table (8 colors for easter egg)
+; Index: 0=green, 1=red, 2=blue, 3=yellow, 4=orange, 5=purple, 6=black, 7=pink
+shell_colors:
+    .byte $1A   ; Green (default)
+    .byte $16   ; Red
+    .byte $02   ; Dark Blue
+    .byte $14   ; Purple
+    .byte $0F   ; Black
+    .byte $17   ; Brown
+    .byte $0A   ; Dark Green
+    .byte $06   ; Dark Red/Maroon
+    .byte $1C   ; Dark Cyan
+    .byte $04   ; Dark Purple
+    .byte $00   ; Dark Gray
+    .byte $12   ; Medium Blue
+    .byte $07   ; Dark Brown
+    .byte $2A   ; Bright Green
+    .byte $1B   ; Teal
+    .byte $0C   ; Dark Teal
 
 ; Background nametable data (960 bytes each)
 BG0: .incbin "../nam/bg0.nam"
@@ -1761,39 +2147,363 @@ update_walk_tiles:
 ; Update Score Display Sprites
 ;===============================================================================
 update_score_display:
-    ; Update sprite tiles based on score digits
+    ; Hide score on title screen (using BG tiles instead)
+    lda game_state
+    cmp #STATE_TITLE
+    beq @hide_score
+    cmp #STATE_TITLE_FADE
+    beq @hide_score
+    ; Hide score during fade-in (going to title/waiting)
+    cmp #STATE_FADE_IN
+    beq @hide_score
+    ; Hide score during waiting state
+    cmp #STATE_WAITING
+    beq @hide_score
+    ; Hide score during game over (shown as BG text)
+    cmp #STATE_GAME_OVER
+    beq @hide_score
+    ; Hide score during playing until first pipe is passed
+    cmp #STATE_PLAYING
+    bne @show_score
+    ; Playing state - check if score > 0
+    lda score_ones
+    ora score_tens
+    ora score_hundreds
+    beq @hide_score       ; Score is 0, hide it
+@show_score:
+    ; Show current score as sprites
+    lda #SCORE_Y
+    sta OAM_BUFFER+24     ; Show hundreds Y
+    sta OAM_BUFFER+28     ; Show tens Y
+    sta OAM_BUFFER+32     ; Show ones Y
     lda score_hundreds
     clc
     adc #DIGIT_TILE_BASE
     sta OAM_BUFFER+25     ; Hundreds digit tile
-
     lda score_tens
     clc
     adc #DIGIT_TILE_BASE
     sta OAM_BUFFER+29     ; Tens digit tile
-
     lda score_ones
     clc
     adc #DIGIT_TILE_BASE
     sta OAM_BUFFER+33     ; Ones digit tile
     rts
 
+@hide_score:
+    ; Hide score sprites
+    lda #$FF
+    sta OAM_BUFFER+24     ; Hide hundreds
+    sta OAM_BUFFER+28     ; Hide tens
+    sta OAM_BUFFER+32     ; Hide ones
+    rts
+
 ;===============================================================================
 ; Title Text Drawing
 ;===============================================================================
 draw_title_text:
-    ; Draw "PRESS A OR B" on row 14, "TO PLAY" on row 15
-    ; Row 14, column 10 = $21CA
-    ; Row 15, column 12 = $21EC (centered under line 1)
+    ; Title screen: TOP XXX / FLAPPY / PARATROOPA / 2026 / PRESS START
     ; Alphabet: A=$20, B=$21, ... Z=$39
+    ; BG Digits: 0=$50, 1=$51, ... 9=$59
     bit PPU_STATUS
 
-    ; Line 1: "PRESS A OR B" at row 14, col 10
+    ; "TOP XXX" at row 2, centered (cols 12-18)
+    ; Row 2, col 12 = $2000 + 2*32 + 12 = $204C
+    lda #$20
+    sta PPU_ADDR
+    lda #$4C
+    sta PPU_ADDR
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    ; Digits from hiscore
+    lda hiscore_hundreds
+    clc
+    adc #$50              ; BG digit tile base
+    sta PPU_DATA
+    lda hiscore_tens
+    clc
+    adc #$50
+    sta PPU_DATA
+    lda hiscore_ones
+    clc
+    adc #$50
+    sta PPU_DATA
+
+    ; "FLAPPY" at row 10, col 13 = $214D
+    lda #$21
+    sta PPU_ADDR
+    lda #$4D
+    sta PPU_ADDR
+    lda #$25              ; F
+    sta PPU_DATA
+    lda #$2B              ; L
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$38              ; Y
+    sta PPU_DATA
+
+    ; "PARATROOPA" at row 12, col 11 = $218B
+    lda #$21
+    sta PPU_ADDR
+    lda #$8B
+    sta PPU_ADDR
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+
+    ; "2026" at row 14, col 14 = $21CE
+    lda #$21
+    sta PPU_ADDR
+    lda #$CE
+    sta PPU_ADDR
+    lda #$52              ; 2
+    sta PPU_DATA
+    lda #$50              ; 0
+    sta PPU_DATA
+    lda #$52              ; 2
+    sta PPU_DATA
+    lda #$56              ; 6
+    sta PPU_DATA
+
+    ; "PRESS START" at row 19, col 10 = $226A
+    lda #$22
+    sta PPU_ADDR
+    lda #$6A
+    sta PPU_ADDR
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$24              ; E
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    lda #$32              ; S
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$20              ; A
+    sta PPU_DATA
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$33              ; T
+    sta PPU_DATA
+
+    ; Fix attributes for text area (palette 3 = white)
+    ; Attr row 0 ($23C3): covers rows 0-3 (TOP XXX at row 2, cols 12-18)
+    lda #$23
+    sta PPU_ADDR
+    lda #$C3
+    sta PPU_ADDR
+    lda #$FF
+    sta PPU_DATA
+    sta PPU_DATA
+
+    ; Attr row 2 ($23D2): covers rows 8-11 (FLAPPY)
+    lda #$23
+    sta PPU_ADDR
+    lda #$D2
+    sta PPU_ADDR
+    lda #$FF
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    ; Attr row 3 ($23DA): covers rows 12-15 (PARATROOPA, 2026)
+    lda #$23
+    sta PPU_ADDR
+    lda #$DA
+    sta PPU_ADDR
+    lda #$FF
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    ; Attr row 4 ($23E2): covers rows 16-19 (PRESS START)
+    lda #$23
+    sta PPU_ADDR
+    lda #$E2
+    sta PPU_ADDR
+    lda #$FF
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    rts
+
+;---------------------------------------
+; Draw TOP score only (for waiting screen after restart)
+;---------------------------------------
+draw_top_score:
+    bit PPU_STATUS
+    ; "TOP XXX" at row 2, col 12 = $204C
+    lda #$20
+    sta PPU_ADDR
+    lda #$4C
+    sta PPU_ADDR
+    lda #$33              ; T
+    sta PPU_DATA
+    lda #$2E              ; O
+    sta PPU_DATA
+    lda #$2F              ; P
+    sta PPU_DATA
+    lda #$00              ; (space)
+    sta PPU_DATA
+    ; Digits from hiscore
+    lda hiscore_hundreds
+    clc
+    adc #$50              ; BG digit tile base
+    sta PPU_DATA
+    lda hiscore_tens
+    clc
+    adc #$50
+    sta PPU_DATA
+    lda hiscore_ones
+    clc
+    adc #$50
+    sta PPU_DATA
+    ; Fix attr row 0 for TOP area
+    lda #$23
+    sta PPU_ADDR
+    lda #$C3
+    sta PPU_ADDR
+    lda #$FF
+    sta PPU_DATA
+    sta PPU_DATA
+    rts
+
+;---------------------------------------
+; Clear title text (called from NMI)
+;---------------------------------------
+clear_title_text:
+    ; Clear title screen text (keep TOP XXX visible for waiting screen)
+    bit PPU_STATUS
+
+    ; Clear "FLAPPY" at row 10, col 13 (6 tiles)
+    lda #$21
+    sta PPU_ADDR
+    lda #$4D
+    sta PPU_ADDR
+    lda #$00
+    ldx #6
+@clear_line1:
+    sta PPU_DATA
+    dex
+    bne @clear_line1
+
+    ; Clear "PARATROOPA" at row 12, col 11 (10 tiles)
+    lda #$21
+    sta PPU_ADDR
+    lda #$8B
+    sta PPU_ADDR
+    lda #$00
+    ldx #10
+@clear_line2:
+    sta PPU_DATA
+    dex
+    bne @clear_line2
+
+    ; Clear "2026" at row 14, col 14 (4 tiles)
+    lda #$21
+    sta PPU_ADDR
+    lda #$CE
+    sta PPU_ADDR
+    lda #$00
+    ldx #4
+@clear_line3:
+    sta PPU_DATA
+    dex
+    bne @clear_line3
+
+    ; Clear "PRESS START" at row 19, col 10 (11 tiles)
+    lda #$22
+    sta PPU_ADDR
+    lda #$6A
+    sta PPU_ADDR
+    lda #$00
+    ldx #11
+@clear_line4:
+    sta PPU_DATA
+    dex
+    bne @clear_line4
+
+    ; Restore attributes for pipe area
+    lda #$23
+    sta PPU_ADDR
+    lda #$D2
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    lda #$23
+    sta PPU_ADDR
+    lda #$DA
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+
+    lda #$23
+    sta PPU_ADDR
+    lda #$E2
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    rts
+
+;---------------------------------------
+; Draw waiting text (PRESS A OR B / TO FLAP!)
+;---------------------------------------
+draw_waiting_text:
+    bit PPU_STATUS
+
+    ; "PRESS A OR B" at row 14, col 10 = $21CA
     lda #$21
     sta PPU_ADDR
     lda #$CA
-    sta PPU_ADDR          ; PPU address = $21CA
-
+    sta PPU_ADDR
     lda #$2F              ; P
     sta PPU_DATA
     lda #$31              ; R
@@ -1819,75 +2529,107 @@ draw_title_text:
     lda #$21              ; B
     sta PPU_DATA
 
-    ; Line 2: "TO PLAY" at row 15, col 12
+    ; "TO FLAP!" at row 15, col 12 = $21EC
     lda #$21
     sta PPU_ADDR
     lda #$EC
-    sta PPU_ADDR          ; PPU address = $21EC
-
+    sta PPU_ADDR
     lda #$33              ; T
     sta PPU_DATA
     lda #$2E              ; O
     sta PPU_DATA
     lda #$00              ; (space)
     sta PPU_DATA
-    lda #$2F              ; P
+    lda #$25              ; F
     sta PPU_DATA
     lda #$2B              ; L
     sta PPU_DATA
     lda #$20              ; A
     sta PPU_DATA
-    lda #$38              ; Y
+    lda #$2F              ; P
     sta PPU_DATA
     lda #$48              ; !
     sta PPU_DATA
 
-    ; Fix attribute for text area (attr row 3, byte 4 = $23DC)
-    ; Change from $AA (pipe palette) to $FF (cloud/text palette)
+    ; Fix attribute for text area
     lda #$23
     sta PPU_ADDR
-    lda #$DC
+    lda #$DA
     sta PPU_ADDR
-    lda #$FF              ; All quadrants use palette 3
+    lda #$FF
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
     sta PPU_DATA
     rts
 
 ;---------------------------------------
-; Clear title text (called from NMI)
+; Clear waiting text
 ;---------------------------------------
-clear_title_text:
-    ; Clear "PRESS A OR B" at row 14, column 10 (12 tiles)
+clear_waiting_text:
     bit PPU_STATUS
+
+    ; Clear "PRESS A OR B" at row 14, col 10 (12 tiles)
     lda #$21
     sta PPU_ADDR
     lda #$CA
-    sta PPU_ADDR          ; PPU address = $21CA
-    lda #$00              ; Empty/sky tile
+    sta PPU_ADDR
+    lda #$00
     ldx #12
-@clear_line1:
+@clear_w1:
     sta PPU_DATA
     dex
-    bne @clear_line1
+    bne @clear_w1
 
-    ; Clear "TO PLAY!" at row 15, column 12 (8 tiles)
+    ; Clear "TO FLAP!" at row 15, col 12 (8 tiles)
     lda #$21
     sta PPU_ADDR
     lda #$EC
-    sta PPU_ADDR          ; PPU address = $21EC
+    sta PPU_ADDR
     lda #$00
     ldx #8
-@clear_line2:
+@clear_w2:
     sta PPU_DATA
     dex
-    bne @clear_line2
+    bne @clear_w2
 
-    ; Restore attribute for pipe area (attr row 3, byte 4 = $23DC)
-    ; Change from $FF (text palette) back to $AA (pipe palette)
+    ; Restore attribute for pipe area
     lda #$23
     sta PPU_ADDR
-    lda #$DC
+    lda #$DA
     sta PPU_ADDR
-    lda #$AA              ; All quadrants use palette 2
+    lda #$AA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    rts
+
+;---------------------------------------
+; Clear TOP score text
+;---------------------------------------
+clear_top_score:
+    bit PPU_STATUS
+    ; Clear "TOP XXX" at row 2, col 12 (7 tiles)
+    lda #$20
+    sta PPU_ADDR
+    lda #$4C
+    sta PPU_ADDR
+    lda #$00
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    sta PPU_DATA
+    ; Restore attr row 0 ($23C3) to pipe palette
+    lda #$23
+    sta PPU_ADDR
+    lda #$C3
+    sta PPU_ADDR
+    lda #$AA
+    sta PPU_DATA
     sta PPU_DATA
     rts
 
@@ -2146,19 +2888,21 @@ show_game_over_screen:
     lda #$20              ; A
     sta PPU_DATA
 
-@draw_push_start:
-    ; Draw "PUSH START" at row 24, col 11 = $2000 + 24*32 + 11 = $230B
+@draw_press_start:
+    ; Draw "PRESS START" at row 24, col 10 = $2000 + 24*32 + 10 = $230A (centered)
     lda #$23
     sta PPU_ADDR
-    lda #$0B
+    lda #$0A
     sta PPU_ADDR
     lda #$2F              ; P
     sta PPU_DATA
-    lda #$34              ; U
+    lda #$31              ; R
+    sta PPU_DATA
+    lda #$24              ; E
     sta PPU_DATA
     lda #$32              ; S
     sta PPU_DATA
-    lda #$27              ; H
+    lda #$32              ; S
     sta PPU_DATA
     lda #$00              ; (space)
     sta PPU_DATA
@@ -2225,19 +2969,19 @@ show_game_over_screen:
     sta fw_timer
     sta fw_frame          ; Start at frame 0
     sta fw_current        ; Start at position 0
+    sta fw_round          ; Start at round 0
     sta fw_wait           ; No initial wait
 
-    ; Hide player sprites (bird/koopa) and score sprites
+    ; Hide ALL sprites first (clears any garbage)
     lda #$FF
     ldx #0
-@hide_player:
-    sta OAM_BUFFER, x     ; Hide Y position
+@hide_all:
+    sta OAM_BUFFER, x
     inx
     inx
     inx
     inx
-    cpx #FW_OAM           ; Stop before firework sprites
-    bcc @hide_player
+    bne @hide_all         ; Loop until X wraps (256 bytes)
 
     ; Set up first firework sprite
     jsr setup_firework_sprite
@@ -2252,8 +2996,19 @@ show_game_over_screen:
     rts
 
 @no_fireworks:
-    ; Enable rendering (background only)
-    lda #%00001010
+    ; Hide all sprites (no fireworks to show)
+    lda #$FF
+    ldx #0
+@hide_all_sprites:
+    sta OAM_BUFFER, x
+    inx
+    inx
+    inx
+    inx
+    bne @hide_all_sprites ; Loop until X wraps (256 bytes = 64 sprites)
+
+    ; Enable rendering (background + sprites hidden via OAM)
+    lda #%00011110
     sta PPU_MASK
 
     ; Set PPUCTRL for NMI (sprites from $0000)
@@ -2391,7 +3146,15 @@ update_fireworks:
     cmp #FW_NUM_POSITIONS
     bcc @done
 
-    ; Completed all positions - stop fireworks
+    ; Completed all positions - check if more rounds
+    lda #0
+    sta fw_current        ; Reset position
+    inc fw_round
+    lda fw_round
+    cmp #2                ; 2 rounds total
+    bcc @done
+
+    ; Completed all rounds - stop fireworks
     lda #0
     sta new_record        ; Clear flag to stop animation
     jmp @done
@@ -2455,6 +3218,7 @@ restart_game:
     sta bird_vel_lo
     sta bird_vel_hi
     sta nt0_has_pipes
+    sta nt0_needs_attrs
     sta sound_timer
     sta sound_state
     sta fw_sound_timer
@@ -2470,6 +3234,9 @@ restart_game:
 
     lda #100
     sta bird_y
+    sta flap_threshold    ; Reset flap threshold
+    lda #56
+    sta bird_x            ; Reset to gameplay X position
 
     ; Reset column/background drawing state
     lda #$FF
@@ -2487,11 +3254,29 @@ restart_game:
     lda #$24
     jsr load_background_only
 
-    ; Set up attributes
-    jsr init_attributes
+    ; Set up attributes: title attrs for NT0 (waiting text), gameplay attrs for NT1 (pipes)
+    ; NT0 will get gameplay attrs cloned from NT1 when it wraps during gameplay
+    jsr init_title_attributes
+    lda #$27
+    jsr write_attr_table  ; NT1 gameplay attrs
 
-    ; Draw title text
-    jsr draw_title_text
+    ; Draw pipes in NT1 (while screen is still black)
+    lda #$24              ; NT1 base
+    sta nt_base
+    lda #0
+    sta pipe_redraw
+    jsr draw_pipes_in_nt  ; Frame 1: pipe 0 body+cap
+    jsr draw_pipes_in_nt  ; Frame 2: pipe 0 gap
+    jsr draw_pipes_in_nt  ; Frame 3: pipe 0 bottom
+    jsr draw_pipes_in_nt  ; Frame 4: pipe 0 attrs
+    jsr draw_pipes_in_nt  ; Frame 5: pipe 1 body+cap
+    jsr draw_pipes_in_nt  ; Frame 6: pipe 1 gap
+    jsr draw_pipes_in_nt  ; Frame 7: pipe 1 bottom
+    jsr draw_pipes_in_nt  ; Frame 8: pipe 1 attrs
+
+    ; Draw waiting screen (TOP XXX + PRESS A OR B)
+    jsr draw_top_score
+    jsr draw_waiting_text
 
     ; Next background index
     lda #2
@@ -2556,8 +3341,8 @@ restart_game:
     sta OAM_BUFFER+15
     sta OAM_BUFFER+23
 
-    ; Score display sprites
-    lda #SCORE_Y
+    ; Score display sprites - hidden initially
+    lda #$FF              ; Hidden (Y off screen)
     sta OAM_BUFFER+24
     sta OAM_BUFFER+28
     sta OAM_BUFFER+32
@@ -2673,9 +3458,11 @@ restart_game:
     sta PPU_SCROLL
     sta PPU_SCROLL
 
-    ; Set fade-in state
+    ; Set fade-in state (target: waiting screen)
     lda #STATE_FADE_IN
     sta game_state
+    lda #STATE_WAITING
+    sta fade_target           ; After fade-in, go to waiting
     lda #4
     sta fade_step
     lda #FADE_DELAY
@@ -2972,10 +3759,15 @@ start_column_redraw:
     cmp #$24
     beq @gen_gaps         ; NT1 - skip to gap generation
 
-    ; NT0 - mark as having pipes
+    ; NT0 - check if first time (needs gameplay attrs)
+    lda nt0_has_pipes
+    bne @nt0_already_setup
+    ; First time NT0 wraps - need to write gameplay attributes
+    lda #1
+    sta nt0_needs_attrs   ; Signal NMI to write gameplay attrs
+@nt0_already_setup:
     lda #1
     sta nt0_has_pipes
-    ; (Attributes already set at init - no PPU writes needed here)
 
 @gen_gaps:
     ; Generate random gap for pipe 0
@@ -3560,13 +4352,82 @@ load_background_only:
 ;   Other cols row 7: palette 1 ($55) - ground
 ;---------------------------------------
 init_attributes:
-    ; Set up NT0 attributes
+    ; Set up NT0 attributes (gameplay mode with pipes)
     lda #$23
     jsr write_attr_table
 
     ; Set up NT1 attributes
     lda #$27
     jmp write_attr_table
+
+;---------------------------------------
+; Init title screen attributes (all palette 3 for text)
+;---------------------------------------
+init_title_attributes:
+    ; Set up NT0 attributes (all $FF for text/sky)
+    lda #$23
+    jsr write_title_attr
+
+    ; Set up NT1 attributes
+    lda #$27
+    jmp write_title_attr
+
+write_title_attr:
+    ; Write title screen attrs: sky rows all $FF, ground rows normal
+    sta $FF
+
+    ; Rows 0-4 ($C0-$E0): all $FF for text/sky (no pipe colors)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$C0
+    sta PPU_ADDR
+    lda #$FF
+    ldx #40               ; 5 rows * 8 bytes = 40
+@title_sky:
+    sta PPU_DATA
+    dex
+    bne @title_sky
+
+    ; Row 5 ($E8): all $AA (palette 2 for bushes)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$E8
+    sta PPU_ADDR
+    lda #$AA
+    ldx #8
+@title_bush:
+    sta PPU_DATA
+    dex
+    bne @title_bush
+
+    ; Row 6 ($F0): $5A (top=pal2 bushes, bottom=pal1 floor)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$F0
+    sta PPU_ADDR
+    lda #$5A
+    ldx #8
+@title_trans:
+    sta PPU_DATA
+    dex
+    bne @title_trans
+
+    ; Row 7 ($F8): all $55 (palette 1 for floor)
+    bit PPU_STATUS
+    lda $FF
+    sta PPU_ADDR
+    lda #$F8
+    sta PPU_ADDR
+    lda #$55
+    ldx #8
+@title_floor:
+    sta PPU_DATA
+    dex
+    bne @title_floor
+    rts
 
 ;---------------------------------------
 ; Write attribute table for one nametable
@@ -3736,7 +4597,7 @@ mmc1_write_E000:
 ; Hi-Score Routines
 ;===============================================================================
 load_hiscore:
-    ; Load hi-score from SRAM if valid, otherwise initialize to 000
+    ; Load hi-score and shell color from SRAM if valid
     ; Check magic bytes
     lda SRAM_MAGIC_1
     cmp #SRAM_MAGIC_VAL1
@@ -3745,12 +4606,14 @@ load_hiscore:
     cmp #SRAM_MAGIC_VAL2
     bne @init_hiscore
 
-    ; Validate checksum: (H + T + O) XOR $55 should equal stored checksum
+    ; Validate checksum: (H + T + O + shell) XOR $55
     lda SRAM_HISCORE_H
     clc
     adc SRAM_HISCORE_T
     clc
     adc SRAM_HISCORE_O
+    clc
+    adc SRAM_SHELL_CLR
     eor #$55
     cmp SRAM_CHECKSUM
     bne @init_hiscore
@@ -3765,28 +4628,37 @@ load_hiscore:
     lda SRAM_HISCORE_O
     cmp #10
     bcs @init_hiscore
+    ; Validate shell color is 0-7
+    lda SRAM_SHELL_CLR
+    cmp #TURTLE_COLOR_COUNT
+    bcs @init_hiscore
 
-    ; Valid! Load hi-score to zero page
+    ; Valid! Load hi-score and shell color to zero page
     lda SRAM_HISCORE_H
     sta hiscore_hundreds
     lda SRAM_HISCORE_T
     sta hiscore_tens
     lda SRAM_HISCORE_O
     sta hiscore_ones
+    lda SRAM_SHELL_CLR
+    sta turtle_color
+    lda #1
+    sta shell_color_dirty ; Update palette on next NMI
     rts
 
 @init_hiscore:
-    ; Invalid or first boot - initialize to 000
+    ; Invalid or first boot - initialize to 000, green shell
     lda #0
     sta hiscore_ones
     sta hiscore_tens
     sta hiscore_hundreds
+    sta turtle_color      ; Default green
     ; Save initial values to SRAM
     jsr save_hiscore
     rts
 
 save_hiscore:
-    ; Save hi-score to SRAM with magic bytes and checksum
+    ; Save hi-score and shell color to SRAM with magic bytes and checksum
     lda #SRAM_MAGIC_VAL1
     sta SRAM_MAGIC_1
     lda #SRAM_MAGIC_VAL2
@@ -3798,13 +4670,17 @@ save_hiscore:
     sta SRAM_HISCORE_T
     lda hiscore_ones
     sta SRAM_HISCORE_O
+    lda turtle_color
+    sta SRAM_SHELL_CLR
 
-    ; Calculate checksum: (H + T + O) XOR $55
+    ; Calculate checksum: (H + T + O + shell) XOR $55
     lda hiscore_hundreds
     clc
     adc hiscore_tens
     clc
     adc hiscore_ones
+    clc
+    adc turtle_color
     eor #$55
     sta SRAM_CHECKSUM
     rts

@@ -1,7 +1,16 @@
-# Flappy Bird for NES - Build System
+# Flappy Paratroopa for NES - Build System
 
-# Project name
+# Project info
 PROJECT = flappy
+GAME_NAME = Flappy Paratroopa
+VERSION = v1.0
+
+# ROM filename following No-Intro naming convention:
+# Game Name (Region) (Unl) (Version).nes
+# - (World) = works on all regions (NTSC/PAL)
+# - (Unl) = Unlicensed/homebrew
+REGION = World
+ROM_NAME = $(GAME_NAME) ($(REGION)) (Unl)
 
 # Assembler and linker (cc65 toolchain)
 AS = ca65
@@ -21,8 +30,9 @@ SOURCES = $(SRC_DIR)/main.asm
 # Object files
 OBJECTS = $(patsubst $(SRC_DIR)/%.asm,$(BUILD_DIR)/%.o,$(SOURCES))
 
-# Output ROM
+# Output ROM (internal name for build, final name for distribution)
 ROM = $(BUILD_DIR)/$(PROJECT).nes
+ROM_DIST = $(BUILD_DIR)/$(ROM_NAME).nes
 
 # Default target
 .PHONY: all
@@ -66,6 +76,22 @@ run: all
 		echo "ROM available at: $(ROM)"; \
 	fi
 
+# Distribution build with proper naming convention
+.PHONY: dist
+dist: all
+	@cp "$(ROM)" "$(ROM_DIST)"
+	@echo "Distribution ROM created:"
+	@ls -lh "$(ROM_DIST)"
+
+# Versioned distribution (includes version tag)
+ROM_DIST_VER = $(BUILD_DIR)/$(GAME_NAME) ($(REGION)) (Unl) ($(VERSION)).nes
+
+.PHONY: dist-ver
+dist-ver: all
+	@cp "$(ROM)" "$(ROM_DIST_VER)"
+	@echo "Versioned distribution ROM created:"
+	@ls -lh "$(ROM_DIST_VER)"
+
 # Debug build with symbols
 .PHONY: debug
 debug: LDFLAGS += --dbgfile $(BUILD_DIR)/$(PROJECT).dbg
@@ -76,21 +102,26 @@ debug: all
 .PHONY: info
 info:
 	@echo "Project: $(PROJECT)"
-	@echo "Output: $(ROM)"
+	@echo "Game: $(GAME_NAME)"
+	@echo "Version: $(VERSION)"
+	@echo "Build ROM: $(ROM)"
+	@echo "Dist ROM: $(ROM_NAME).nes"
 	@echo "Sources: $(SOURCES)"
 
 # Help
 .PHONY: help
 help:
-	@echo "Flappy Bird NES - Build System"
+	@echo "Flappy Paratroopa NES - Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all     - Build the ROM (default)"
-	@echo "  clean   - Remove build artifacts"
-	@echo "  run     - Build and run in emulator"
-	@echo "  debug   - Build with debug symbols"
-	@echo "  info    - Show build information"
-	@echo "  help    - Show this help"
+	@echo "  all      - Build the ROM (default)"
+	@echo "  dist     - Build ROM with No-Intro naming: $(ROM_NAME).nes"
+	@echo "  dist-ver - Build ROM with version tag included"
+	@echo "  clean    - Remove build artifacts"
+	@echo "  run      - Build and run in emulator"
+	@echo "  debug    - Build with debug symbols"
+	@echo "  info     - Show build information"
+	@echo "  help     - Show this help"
 	@echo ""
 	@echo "Requirements: cc65 toolchain (ca65, ld65)"
 

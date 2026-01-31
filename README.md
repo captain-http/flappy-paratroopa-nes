@@ -14,9 +14,13 @@ make
 
 # Build and run in emulator
 make run
+
+# Create distribution ROM (No-Intro naming convention)
+make dist      # Flappy Paratroopa (World) (Unl).nes
+make dist-ver  # Flappy Paratroopa (World) (Unl) (v1.0).nes
 ```
 
-Output: `build/flappy.nes`
+Output: `build/flappy.nes` (dev) or `build/Flappy Paratroopa (World) (Unl).nes` (dist)
 
 ## Development Plan
 
