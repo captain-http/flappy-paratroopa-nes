@@ -151,6 +151,8 @@ Uses NES APU channels for sound effects:
 | Score | Pass a pipe | Pulse 2 | Mario-style coin (B5 → E6) |
 | Crash | Hit a pipe | Noise + Pulse 1 | Noise burst + falling whistle |
 | Ground hit | Hit floor directly | Noise | Noise burst only |
+| Game Over Melody | Turtle lands on floor | Pulse 1 + 2 | Koji Kondo style harmonized melody |
+| Firework | New record celebration | Pulse 2 + Noise | "pu pum pum-pssss" explosion |
 
 ### Sound Variables (Zero Page)
 
@@ -158,12 +160,72 @@ Uses NES APU channels for sound effects:
 |---------|----------|---------|
 | $1D | `sound_timer` | Frames until next sound state |
 | $1E | `sound_state` | State machine (0=idle, 1-2=coin sound) |
+| $3A | `fw_sound_state` | Firework sound state (0=idle, 1-5=explosion) |
+| $3B | `fw_sound_timer` | Firework sound timer |
+| $3C | `go_melody_idx` | Game over melody note index ($FF=idle) |
+| $3D | `go_melody_timer` | Game over melody timer |
+
+### Game Over Melody
+
+Koji Kondo style two-channel harmonized melody plays when turtle lands on floor (both high score and regular deaths):
+- A4+E4 (minor opening) → E4+A3 (echo) → F4+D4, E4+C4 (sighing descent) → D4+B3, C4+A3 (resolution)
+- Uses Pulse 1 (melody) + Pulse 2 (harmony)
+
+### Firework Sound
+
+Drum-style explosion: "pu pum pum-pssss"
+- "pu" - quick hit + noise pop
+- "pum" - deeper hit (noise silent)
+- "pum" - deepest hit + crash starts
+- "pssss" - crash trails off
 
 ### APU Registers Used
 
-- `SQ1_VOL`, `SQ1_SWEEP`, `SQ1_LO`, `SQ1_HI` - Flap and crash whistle
-- `SQ2_VOL`, `SQ2_LO`, `SQ2_HI` - Coin/score sound
-- `NOISE_VOL`, `NOISE_LO`, `NOISE_HI` - Crash and ground hit
+- `SQ1_VOL`, `SQ1_SWEEP`, `SQ1_LO`, `SQ1_HI` - Flap, crash whistle, game over melody
+- `SQ2_VOL`, `SQ2_SWEEP`, `SQ2_LO`, `SQ2_HI` - Coin/score, melody harmony, firework
+- `NOISE_VOL`, `NOISE_LO`, `NOISE_HI` - Crash, ground hit, firework explosion
+
+## Firework System
+
+SMB-style fireworks celebrate new high scores on the game over screen.
+
+### Firework Variables (Zero Page)
+
+| Address | Variable | Purpose |
+|---------|----------|---------|
+| $35 | `fw_timer` | Animation frame timer |
+| $36 | `fw_frame` | Current frame (0, 1, 2) |
+| $37 | `fw_current` | Current position index (0-3) |
+| $38 | `fw_wait` | Wait timer between fireworks |
+
+### Firework Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `FW_ANIM_SPEED` | 8 | Frames between animation updates |
+| `FW_WAIT_TIME` | 30 | Frames to wait between fireworks |
+| `FW_NUM_POSITIONS` | 4 | Number of firework positions |
+| `FW_OAM` | 56 | OAM buffer offset for firework sprites |
+
+### Firework Tiles (2x2 sprites)
+
+| Frame | Top-Left Tile | Description |
+|-------|---------------|-------------|
+| 0 | $4A | Small burst |
+| 1 | $4C | Medium burst |
+| 2 | $4E | Large burst |
+
+### Firework Positions
+
+4 positions symmetric around game over text, cycles once then stops.
+
+### Key Subroutines
+
+- `setup_firework_sprite` - Position sprites and play explosion sound
+- `update_firework_tiles` - Update tiles for current animation frame
+- `update_fireworks` - Main animation update (called each frame)
+- `hide_fireworks` - Hide firework sprites
+- `play_firework_sound` - Start explosion sound effect
 
 ## Cloud System
 

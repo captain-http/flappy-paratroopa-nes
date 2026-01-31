@@ -547,11 +547,7 @@ game_loop:
     sta fade_timer        ; Reuse fade_timer for stun delay
     jsr switch_to_shell   ; Show shell while stunned
     jsr play_ground_hit   ; Just noise burst (no whistle)
-    ; Play game over melody (if not new record)
-    lda new_record
-    bne :+
     jsr play_gameover_melody
-:
     ; Update shell Y positions (same as dying state)
     lda bird_y
     clc
@@ -684,11 +680,7 @@ game_loop:
     sta game_state
     lda #STUN_DELAY
     sta fade_timer        ; Reuse fade_timer for stun delay
-    ; Play game over melody (if not new record)
-    lda new_record
-    bne :+
     jsr play_gameover_melody
-:
 @dying_no_ground:
 
     ; Update shell sprite Y positions (2x2, skip hidden top sprites)
@@ -1467,21 +1459,21 @@ update_gameover_melody:
     rts
 
 ; Melody data: duration, SQ1_LO, SQ1_HI, SQ1_VOL, SQ2_LO, SQ2_HI, SQ2_VOL, (pad)
-; Koji Kondo style: harmonized, bouncy rhythm, major-to-minor feel
-; C5=$0D5, G4=$1AB, E4=$212, C4=$2A6, A4=$17C, F4=$1F8, D4=$254
+; ALT: Slower, wistful - Zelda-like melancholy
+; A4=$17C, E4=$212, C4=$2A6, F4=$1F8, D4=$254, B3=$2D6
 gameover_melody_data:
-    ; "Ba-dum" opening (C5+E4 chord)
-    .byte 8,  $D5, %11111000, %10111110,  $12, %11111010, %10111010, 0  ; C5+E4
-    .byte 4,  $00, %11111000, %00010000,  $00, %11111000, %00010000, 0  ; Rest
-    ; Descending phrase (G4+C4, then E4+G3)
-    .byte 10, $AB, %11111001, %10111100,  $A6, %11111010, %10111000, 0  ; G4+C4
-    .byte 10, $12, %11111010, %10111100,  $56, %11111011, %10111000, 0  ; E4+G3
-    ; Bounce back up (F4+A3)
-    .byte 6,  $F8, %11111001, %10111010,  $F4, %11111010, %10110110, 0  ; F4+A3
-    ; Final descent (E4+C4, D4+B3, C4+G3)
-    .byte 8,  $12, %11111010, %10111000,  $A6, %11111010, %10110110, 0  ; E4+C4
-    .byte 8,  $54, %11111010, %10110110,  $D6, %11111010, %10110100, 0  ; D4+B3
-    .byte 16, $A6, %11111010, %10110100,  $56, %11111011, %10110010, 0  ; C4+G3 (long)
+    ; Gentle opening - A4+E4 (minor feel)
+    .byte 12, $7C, %11111001, %10111100,  $12, %11111010, %10111000, 0  ; A4+E4
+    .byte 6,  $00, %11111000, %00010000,  $00, %11111000, %00010000, 0  ; Rest
+    ; Echo lower - E4+A3
+    .byte 12, $12, %11111010, %10111010,  $F4, %11111010, %10110110, 0  ; E4+A3
+    .byte 6,  $00, %11111000, %00010000,  $00, %11111000, %00010000, 0  ; Rest
+    ; Sighing descent - F4+D4, E4+C4
+    .byte 10, $F8, %11111001, %10111000,  $54, %11111010, %10110110, 0  ; F4+D4
+    .byte 10, $12, %11111010, %10110110,  $A6, %11111010, %10110100, 0  ; E4+C4
+    ; Final resolution - D4+B3, C4+A3 (long fade)
+    .byte 12, $54, %11111010, %10110100,  $D6, %11111010, %10110010, 0  ; D4+B3
+    .byte 20, $A6, %11111010, %10110010,  $F4, %11111010, %01110000, 0  ; C4+A3
     ; End
     .byte 0, 0, 0, 0, 0, 0, 0, 0
 
@@ -2399,9 +2391,9 @@ update_fireworks:
     cmp #FW_NUM_POSITIONS
     bcc @done
 
-    ; Completed all positions - loop back to first
+    ; Completed all positions - stop fireworks
     lda #0
-    sta fw_current
+    sta new_record        ; Clear flag to stop animation
     jmp @done
 
 @update_display:
@@ -2469,6 +2461,12 @@ restart_game:
     sta fw_sound_state
     lda #$FF
     sta go_melody_idx     ; Melody idle
+
+    ; Silence all APU channels
+    lda #%00010000        ; Volume = 0
+    sta SQ1_VOL
+    sta SQ2_VOL
+    sta NOISE_VOL
 
     lda #100
     sta bird_y
