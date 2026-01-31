@@ -149,6 +149,14 @@ reset:
     lda #$27              ; Color 3 - orange (feet/details)
     sta PPU_DATA
 
+    ; Sprite palette 1 ($3F14) - Firework colors
+    lda #$16              ; Color 1 - red
+    sta PPU_DATA
+    lda #$30              ; Color 2 - white
+    sta PPU_DATA
+    lda #$27              ; Color 3 - orange
+    sta PPU_DATA
+
     ; Load background 0 (title screen) into NT0
     lda #0
     sta bg_index
@@ -423,6 +431,7 @@ game_loop:
 
     ; Update sound effects
     jsr update_sound
+    jsr update_firework_sound
 
     ; Check game state
     lda game_state
@@ -820,6 +829,9 @@ game_loop:
     jmp game_loop
 
 @game_over_state:
+    ; Animate fireworks (if new record)
+    jsr update_fireworks
+
     ; Waiting for player to press START to restart
     jsr read_controller
     lda buttons_new
@@ -910,7 +922,18 @@ nmi:
     lda #$00
     sta PPU_SCROLL
     sta PPU_SCROLL
-    lda #%10010000        ; NMI on, nametable 0
+    ; Check if game over with new record (needs sprites from $1000)
+    lda game_state
+    cmp #STATE_GAME_OVER
+    bne @normal_ctrl
+    lda new_record
+    beq @normal_ctrl
+    ; New record: sprites from $1000 for fireworks
+    lda #%10011000        ; NMI on, sprites $1000, nametable 0
+    sta PPU_CTRL
+    jmp @scroll_done
+@normal_ctrl:
+    lda #%10010000        ; NMI on, sprites $0000, nametable 0
     sta PPU_CTRL
 
 @scroll_done:
@@ -1257,6 +1280,109 @@ play_ground_hit:
     sta NOISE_LO
     lda #%00000100        ; Short length
     sta NOISE_HI
+    rts
+
+play_firework_sound:
+    ; "pu pum pum-pssss" - three hits, last with crash
+    ; State: 1=pu, 2=pum, 3=pum+crash, 4=pssss, 5=done
+    lda #1
+    sta fw_sound_state
+    lda #3                ; "pu" duration
+    sta fw_sound_timer
+
+    ; "pu" - quick hit + small noise
+    lda #%11011111        ; Duty 75%, vol=15
+    sta SQ2_VOL
+    lda #%00000000        ; No sweep
+    sta SQ2_SWEEP
+    lda #$C0
+    sta SQ2_LO
+    lda #%11111010        ; Timer high = 2
+    sta SQ2_HI
+
+    ; Small noise pop
+    lda #%00111010        ; Vol=10
+    sta NOISE_VOL
+    lda #%00000100        ; Period 4
+    sta NOISE_LO
+    lda #%00000100
+    sta NOISE_HI
+    rts
+
+update_firework_sound:
+    lda fw_sound_state
+    beq @fw_sound_done    ; State 0 = idle
+
+    dec fw_sound_timer
+    bne @fw_sound_done
+
+    ; Timer expired - advance state
+    inc fw_sound_state
+    lda fw_sound_state
+
+    cmp #2
+    beq @pum1
+    cmp #3
+    beq @pum2_crash
+    cmp #4
+    beq @pssss
+    cmp #5
+    beq @fw_silence
+    bcs @fw_silence
+    jmp @fw_sound_done
+
+@pum1:
+    ; "pum" - second hit, slightly lower
+    lda #%11011111        ; Duty 75%, vol=15
+    sta SQ2_VOL
+    lda #$E0
+    sta SQ2_LO
+    lda #%11111010        ; Timer high = 2
+    sta SQ2_HI
+    lda #%00010000        ; Silence noise
+    sta NOISE_VOL
+    lda #3
+    sta fw_sound_timer
+    jmp @fw_sound_done
+
+@pum2_crash:
+    ; "pum" - third hit + crash starts
+    lda #%11011111        ; Duty 75%, vol=15
+    sta SQ2_VOL
+    lda #$F0              ; Deepest
+    sta SQ2_LO
+    lda #%11111011        ; Timer high = 3
+    sta SQ2_HI
+    lda #%00111111        ; Crash vol=15
+    sta NOISE_VOL
+    lda #%00000100        ; Period 4
+    sta NOISE_LO
+    lda #%00000100
+    sta NOISE_HI
+    lda #4
+    sta fw_sound_timer
+    jmp @fw_sound_done
+
+@pssss:
+    ; "pssss" - crash trails off
+    lda #%00010000        ; Silence pulse
+    sta SQ2_VOL
+    lda #%00110101        ; Crash vol=5
+    sta NOISE_VOL
+    lda #%00000110        ; Period 6
+    sta NOISE_LO
+    lda #5
+    sta fw_sound_timer
+    jmp @fw_sound_done
+
+@fw_silence:
+    lda #%00010000        ; Volume = 0
+    sta NOISE_VOL
+    sta SQ2_VOL
+    lda #0
+    sta fw_sound_state
+
+@fw_sound_done:
     rts
 
 play_score_sound:
@@ -1986,14 +2112,212 @@ show_game_over_screen:
     lda #$30              ; Color 3 = White
     sta PPU_DATA
 
+    ; Check if new record - if so, set up fireworks
+    lda new_record
+    beq @no_fireworks
+
+    ; Set sprite palette 1 for fireworks (black bg, red, white, orange)
+    lda #$3F
+    sta PPU_ADDR
+    lda #$15              ; Sprite palette 1, color 1
+    sta PPU_ADDR
+    lda #$16              ; Red
+    sta PPU_DATA
+    lda #$30              ; White
+    sta PPU_DATA
+    lda #$27              ; Orange
+    sta PPU_DATA
+
+    ; Initialize firework animation (one at a time, loops until START)
+    lda #0
+    sta fw_timer
+    sta fw_frame          ; Start at frame 0
+    sta fw_current        ; Start at position 0
+    sta fw_wait           ; No initial wait
+
+    ; Hide player sprites (bird/koopa) and score sprites
+    lda #$FF
+    ldx #0
+@hide_player:
+    sta OAM_BUFFER, x     ; Hide Y position
+    inx
+    inx
+    inx
+    inx
+    cpx #FW_OAM           ; Stop before firework sprites
+    bcc @hide_player
+
+    ; Set up first firework sprite
+    jsr setup_firework_sprite
+
+    ; Enable rendering (background + sprites)
+    lda #%00011110
+    sta PPU_MASK
+
+    ; Set PPUCTRL: sprites from $1000 (same as bg, where firework tiles are)
+    lda #%10011000        ; Bit 3 = 1: sprites from $1000
+    sta PPU_CTRL
+    rts
+
+@no_fireworks:
     ; Enable rendering (background only)
     lda #%00001010
     sta PPU_MASK
 
-    ; Set PPUCTRL for NMI
+    ; Set PPUCTRL for NMI (sprites from $0000)
     lda #%10010000
     sta PPU_CTRL
 
+    rts
+
+;===============================================================================
+; Firework Sprites (SMB style - one at a time)
+;===============================================================================
+
+; Firework position table (X, Y pairs) - symmetric around text
+; Positions next to NEW RECORD! (row 12) and #FLAPPYPARATROOPA (row 18)
+fw_positions:
+    .byte 24, 144         ; Position 0: left of # in #FLAPPYPARATROOPA (row 18, +1 space)
+    .byte 56, 96          ; Position 1: left of N in NEW RECORD! (row 12)
+    .byte 176, 96         ; Position 2: right of ! in NEW RECORD! (row 12)
+    .byte 208, 144        ; Position 3: right of A in #FLAPPYPARATROOPA (row 18, +1 space)
+
+; Set up firework sprite at current position with current frame
+setup_firework_sprite:
+    ; Play firework pop sound
+    jsr play_firework_sound
+
+    ; Get position index * 2 for table lookup
+    lda fw_current
+    asl a                 ; * 2 (each entry is 2 bytes)
+    tax
+
+    ; Set X positions
+    lda fw_positions, x   ; Get X from table
+    sta OAM_BUFFER+FW_OAM+3    ; Top-left X
+    sta OAM_BUFFER+FW_OAM+11   ; Bottom-left X
+    clc
+    adc #8
+    sta OAM_BUFFER+FW_OAM+7    ; Top-right X
+    sta OAM_BUFFER+FW_OAM+15   ; Bottom-right X
+
+    ; Set Y positions
+    lda fw_positions+1, x ; Get Y from table
+    sta OAM_BUFFER+FW_OAM+0    ; Top-left Y
+    sta OAM_BUFFER+FW_OAM+4    ; Top-right Y
+    clc
+    adc #8
+    sta OAM_BUFFER+FW_OAM+8    ; Bottom-left Y
+    sta OAM_BUFFER+FW_OAM+12   ; Bottom-right Y
+
+    ; Set attributes (palette 1)
+    lda #FW_PALETTE_ATTR
+    sta OAM_BUFFER+FW_OAM+2
+    sta OAM_BUFFER+FW_OAM+6
+    sta OAM_BUFFER+FW_OAM+10
+    sta OAM_BUFFER+FW_OAM+14
+
+    ; Set tiles based on current frame
+    jsr update_firework_tiles
+    rts
+
+; Update firework tiles based on fw_frame
+update_firework_tiles:
+    lda fw_frame
+    cmp #0
+    bne @not_frame0
+    lda #FW_TILE_FRAME0
+    jmp @set_tiles
+@not_frame0:
+    cmp #1
+    bne @frame2
+    lda #FW_TILE_FRAME1
+    jmp @set_tiles
+@frame2:
+    lda #FW_TILE_FRAME2
+
+@set_tiles:
+    ; A = base tile for current frame
+    sta OAM_BUFFER+FW_OAM+1    ; Top-left tile
+    clc
+    adc #1
+    sta OAM_BUFFER+FW_OAM+5    ; Top-right tile
+    clc
+    adc #$0F                    ; +$10 - 1 = next row ($5A - $4B = $0F)
+    sta OAM_BUFFER+FW_OAM+9    ; Bottom-left tile
+    clc
+    adc #1
+    sta OAM_BUFFER+FW_OAM+13   ; Bottom-right tile
+    rts
+
+; Update firework animation (call each frame during game over)
+; One firework at a time, loops through positions until START pressed
+update_fireworks:
+    ; Only animate if new record
+    lda new_record
+    beq @done
+
+    ; Check if waiting between fireworks
+    lda fw_wait
+    beq @animate
+
+    ; Decrement wait timer
+    dec fw_wait
+    bne @done
+
+    ; Wait complete - show next firework
+    jsr setup_firework_sprite
+    jmp @done
+
+@animate:
+    ; Increment timer
+    inc fw_timer
+    lda fw_timer
+    cmp #FW_ANIM_SPEED
+    bcc @done
+
+    ; Timer expired - reset timer
+    lda #0
+    sta fw_timer
+
+    ; Advance frame
+    inc fw_frame
+    lda fw_frame
+    cmp #3
+    bcc @update_display   ; Still animating current firework
+
+    ; Firework complete - hide sprites and start wait period
+    jsr hide_fireworks
+    lda #FW_WAIT_TIME
+    sta fw_wait
+
+    ; Set up for next position index
+    lda #0
+    sta fw_frame
+    inc fw_current
+    lda fw_current
+    cmp #FW_NUM_POSITIONS
+    bcc @done
+
+    ; Completed all positions - loop back to first
+    lda #0
+    sta fw_current
+    jmp @done
+
+@update_display:
+    ; Just update tiles for current frame
+    jsr update_firework_tiles
+
+@done:
+    rts
+
+; Hide firework sprites (call when restarting game)
+hide_fireworks:
+    lda #$FF
+    sta OAM_BUFFER+FW_OAM+0
+    sta OAM_BUFFER+FW_OAM+4
+    sta OAM_BUFFER+FW_OAM+8
+    sta OAM_BUFFER+FW_OAM+12
     rts
 
 ;===============================================================================
@@ -2008,6 +2332,9 @@ restart_game:
     lda #$00
     sta PPU_CTRL
     sta PPU_MASK
+
+    ; Hide firework sprites
+    jsr hide_fireworks
 
     ; Set palette to all black for fade-in start
     bit PPU_STATUS
@@ -2038,6 +2365,8 @@ restart_game:
     sta nt0_has_pipes
     sta sound_timer
     sta sound_state
+    sta fw_sound_timer
+    sta fw_sound_state
 
     lda #100
     sta bird_y

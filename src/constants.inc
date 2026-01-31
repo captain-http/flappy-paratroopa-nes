@@ -58,6 +58,8 @@ SCORE_X_ONES     = 128  ; X position of ones digit
 ; Sound variables
 sound_timer     = $1D   ; Frames until next sound state
 sound_state     = $1E   ; 0=idle, 1=coin B5, 2=coin E6
+fw_sound_state  = $3A   ; Firework sound state (0=idle, 1-6=notes)
+fw_sound_timer  = $3B   ; Firework sound timer
 
 ; Game over screen
 new_record      = $1F   ; Flag: 1 = player beat hi-score
@@ -97,6 +99,25 @@ SRAM_CHECKSUM   = $6005 ; Checksum: (H + T + O) XOR $55
 ; SRAM magic values
 SRAM_MAGIC_VAL1 = $F1
 SRAM_MAGIC_VAL2 = $AB
+
+; Firework variables (for new record celebration - SMB style, one at a time)
+fw_timer        = $35   ; Firework animation timer
+fw_frame        = $36   ; Current animation frame (0, 1, 2)
+fw_current      = $37   ; Current firework position index (0-2)
+fw_wait         = $38   ; Wait timer between fireworks
+; Firework constants
+FW_ANIM_SPEED   = 8     ; Frames between animation updates
+FW_WAIT_TIME    = 30    ; Frames to wait between fireworks
+FW_TILE_FRAME0  = $4A   ; Frame 0 top-left tile (small burst)
+FW_TILE_FRAME1  = $4C   ; Frame 1 top-left tile (medium burst)
+FW_TILE_FRAME2  = $4E   ; Frame 2 top-left tile (large burst)
+FW_NUM_POSITIONS = 4    ; Number of firework positions
+
+; Firework OAM offset (only need 4 sprites for one firework)
+FW_OAM          = 56    ; Firework uses OAM_BUFFER+56 to +71
+
+; Sprite palette for fireworks (palette 1)
+FW_PALETTE_ATTR = $01   ; Use sprite palette 1
 
 ; Hi-score display constants
 HISCORE_Y        = 32   ; Y position of hi-score display
