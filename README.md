@@ -1,11 +1,46 @@
-# Flappy Bird for NES
+# Flappy Paratroopa
 
-A clone of the classic mobile game, written in 6502 assembly for the Nintendo Entertainment System.
+**You've stomped hundreds of them. Now be one.**
 
-## Building
+A Koopa Paratroopa escapes World 1-1 and finds itself in a familiar nightmare: endless pipes, one-hit deaths, and the cruel pull of gravity. Flap to survive. How far can you go?
+
+This isn't a demake or a ROM hack—it's a brand new NES game, handcrafted in 6502 assembly and playable on real hardware.
+
+## What Makes It Special
+
+- **Your Koopa has personality.** Die and watch it retreat into its shell, peek out nervously, then waddle off-screen in shame.
+- **Beat your high score? Fireworks.** You earned them.
+- **Battery-backed saves.** Your best score is waiting for you next time.
+- **Sounds like the real deal.** Crisp flap sounds, coin chimes, and a melancholy game over tune that wouldn't feel out of place in a first-party Nintendo game.
+- **Poke around the title screen.** Not all Koopas are green...
+
+## Controls
+
+| Button | Action |
+|--------|--------|
+| A / B | Flap |
+| START | Play |
+| SELECT | ????? |
+
+## Runs On
+
+- Real NES/Famicom (via flashcart)
+- Any NES emulator (Mesen, FCEUX, RetroArch, etc.)
+
+One ROM. No compromises. Pure 8-bit.
+
+## Download
+
+Grab the ROM from the [Releases](../../releases) section—it's free!
+
+If you enjoy the game, consider supporting the project on **[itch.io](https://captain-http.itch.io/flappy-paratroopa-nes)** where donations are welcome.
+
+## Building From Source
+
+Requires the [cc65](https://cc65.github.io/) toolchain.
 
 ```bash
-# Install cc65 toolchain
+# Install cc65
 sudo apt-get install cc65  # Debian/Ubuntu
 brew install cc65          # macOS
 
@@ -14,50 +49,27 @@ make
 
 # Build and run in emulator
 make run
-
-# Create distribution ROM (No-Intro naming convention)
-make dist      # Flappy Paratroopa (World) (Unl).nes
-make dist-ver  # Flappy Paratroopa (World) (Unl) (v1.0).nes
 ```
 
-Output: `build/flappy.nes` (dev) or `build/Flappy Paratroopa (World) (Unl).nes` (dist)
+Output: `build/flappy.nes`
 
-## Development Plan
+## Technical Details
 
-### Phase 1: Foundation
-- [x] Basic NES setup — solid color background, proves toolchain works
-- [x] Render static background — fill nametable with sky color
-- [x] Draw a single sprite — a square for the bird, static
-- [ ] ~~Move sprite with controller~~ (skipped - not needed for Flappy Bird)
+| | |
+|-|-|
+| Mapper | NROM-256 |
+| PRG ROM | 32 KB |
+| CHR ROM | 8 KB |
+| SRAM | Battery-backed |
 
-### Phase 2: Core Mechanics
-- [x] Implement gravity — bird falls automatically every frame (8.8 fixed-point)
-- [x] Add flap mechanic — A/B button gives upward velocity (-4 px/frame)
-- [x] Add ground — SMB-style 2x2 tile pattern with external CHR graphics
-- [x] Ground collision — bird hits ground triggers game over (Y=192)
+See [CLAUDE.md](CLAUDE.md) for the full technical breakdown—sprite layouts, memory maps, sound engine details, and more.
 
-### Phase 3: Obstacles
-- [x] Draw one static pipe pair — top and bottom pipes with 64px gap
-- [x] Scroll pipe leftward — background scrolls, pipes redrawn on loop
-- [x] Pipe collision detection — game over on touch, bird falls
-- [x] Multiple pipes — 2 pipes spaced 128px apart, both scrolling
+## Credits
 
-### Phase 4: Game Loop
-- [x] Add score counter — increment when passing pipe (max 999)
-- [x] Display score on screen — 3-digit sprite display centered at top
-- [x] Game over state — dying state (falls), dead state (frozen)
-- [ ] Title screen — press Start to begin
-
-### Phase 5: Polish
-- [x] Replace squares with real pixel art tiles — Koopa Paratroopa (2x3 sprites)
-- [x] Add animation frames — wing flapping every 8 frames
-- [x] Add sound effects — flap, score (coin), crash, ground hit
-- [ ] Add music (optional)
-
-## Dev Reference
-
-See [DEVREF.md](DEVREF.md) for technical decisions and implementation details.
+Built by a human and an AI, pair-programming late into the night. [Claude Code](https://claude.ai/code) (Anthropic's AI coding agent) wrote the 6502 assembly and documentation. The human brought the vision, direction, and the patience to fix the cursed bugs we created together.
 
 ## License
 
-MIT License - See [LICENSE](LICENSE)
+**Code:** MIT License - See [LICENSE](LICENSE)
+
+**Art/Characters:** The Koopa Paratroopa, pipes, and other visual elements are Nintendo's intellectual property. This is a fan project made for fun and education, not for profit.

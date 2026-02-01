@@ -910,6 +910,7 @@ game_loop:
     sta fade_step
     lda #FADE_DELAY
     sta fade_timer
+    jsr play_start_melody     ; Play happy adventure melody
     jmp game_loop
 
 @title_check_select:
@@ -1050,6 +1051,7 @@ game_loop:
 @title_fade_state:
     ; Fading out from title to waiting
     jsr rand_lfsr         ; Continue gathering entropy
+    jsr update_start_melody   ; Continue playing adventure melody
     dec fade_timer
     beq @title_fade_tick
     jmp @title_fade_done
@@ -1121,6 +1123,22 @@ game_loop:
     sta OAM_BUFFER+7
     sta OAM_BUFFER+15
     sta OAM_BUFFER+23
+
+    ; Reset sprite tiles to frame 0 (not creepy wing pose)
+    lda #0
+    sta anim_frame
+    lda #$01
+    sta OAM_BUFFER+1      ; Top-left tile
+    lda #$02
+    sta OAM_BUFFER+5      ; Top-right tile
+    lda #$03
+    sta OAM_BUFFER+9      ; Mid-left tile
+    lda #$04
+    sta OAM_BUFFER+13     ; Mid-right tile
+    lda #$05
+    sta OAM_BUFFER+17     ; Bottom-left tile
+    lda #$06
+    sta OAM_BUFFER+21     ; Bottom-right tile
 
     ; Reset scroll and re-enable rendering
     bit PPU_STATUS
@@ -1819,6 +1837,91 @@ gameover_melody_data:
     ; Final resolution - D4+B3, C4+A3 (long fade)
     .byte 12, $54, %11111010, %10110100,  $D6, %11111010, %10110010, 0  ; D4+B3
     .byte 20, $A6, %11111010, %10110010,  $F4, %11111010, %01110000, 0  ; C4+A3
+    ; End
+    .byte 0, 0, 0, 0, 0, 0, 0, 0
+
+;-------------------------------------------------------------------------------
+; Start Melody (Koji Kondo SMB style) - plays when starting new game
+;-------------------------------------------------------------------------------
+play_start_melody:
+    ; Start the melody - index 0, first note
+    lda #0
+    sta go_melody_idx         ; Reuse game over melody variables
+    lda #1                    ; Start immediately
+    sta go_melody_timer
+    ; No sweep - clean chorus sound
+    lda #$08
+    sta SQ1_SWEEP
+    sta SQ2_SWEEP
+    rts
+
+update_start_melody:
+    lda go_melody_idx
+    cmp #$FF                  ; $FF = melody done/idle
+    beq @start_melody_done
+
+    ; Decrement timer
+    dec go_melody_timer
+    bne @start_melody_done
+
+    ; Timer expired - play next note
+    lda go_melody_idx
+    asl                       ; Multiply by 8 (each entry is 8 bytes)
+    asl
+    asl
+    tax
+
+    ; Read note duration (0 = end of melody)
+    lda start_melody_data, x
+    beq @start_melody_end
+
+    ; Store duration for next note
+    sta go_melody_timer
+
+    ; Read and set Pulse 1 (melody)
+    lda start_melody_data+1, x
+    sta SQ1_LO
+    lda start_melody_data+2, x
+    sta SQ1_HI
+    lda start_melody_data+3, x
+    sta SQ1_VOL
+
+    ; Read and set Pulse 2 (harmony)
+    lda start_melody_data+4, x
+    sta SQ2_LO
+    lda start_melody_data+5, x
+    sta SQ2_HI
+    lda start_melody_data+6, x
+    sta SQ2_VOL
+
+    ; Advance to next note
+    inc go_melody_idx
+    jmp @start_melody_done
+
+@start_melody_end:
+    ; Silence and mark as done
+    lda #%00010000
+    sta SQ1_VOL
+    sta SQ2_VOL
+    lda #$FF
+    sta go_melody_idx
+
+@start_melody_done:
+    rts
+
+; Start melody data: duration, SQ1_LO, SQ1_HI, SQ1_VOL, SQ2_LO, SQ2_HI, SQ2_VOL, pad
+; Chorale-style fanfare - rich harmonies, warm and welcoming
+; Uses 50% duty for full, warm tone
+; C4=$1AB, E4=$152, G4=$11C, C5=$0D6, E5=$0AA, G5=$08E
+start_melody_data:
+    ; Rich opening chord - C major (C4+E4)
+    .byte 12, $AB, %11111001, %10111010,  $52, %11111001, %10111000, 0  ; C4+E4
+    ; Rise to G major feel (G4+B4) - B4=$0E2
+    .byte 12, $1C, %11111001, %10111010,  $E2, %11111000, %10111000, 0  ; G4+B4
+    ; Resolve higher - C5+E5 (bright!)
+    .byte 12, $D6, %11111000, %10111100,  $AA, %11111000, %10111010, 0  ; C5+E5
+    ; Final triumphant C5+G5 (perfect fifth - powerful!)
+    .byte 20, $D6, %11111000, %10111110,  $8E, %11111000, %10111100, 0  ; C5+G5 (glory!)
     ; End
     .byte 0, 0, 0, 0, 0, 0, 0, 0
 
