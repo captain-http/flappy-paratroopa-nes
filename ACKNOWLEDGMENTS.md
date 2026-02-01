@@ -1,4 +1,4 @@
-# Special Thanks
+# Acknowledgments
 
 To my mom, who gave me my first NES when I was around five years old.
 

@@ -68,7 +68,7 @@ See [CLAUDE.md](CLAUDE.md) for the full technical breakdown—sprite layouts, me
 
 Built by a human and an AI, pair-programming late into the night. [Claude Code](https://claude.ai/code) (Anthropic's AI coding agent) wrote the 6502 assembly and documentation. The human brought the vision, direction, and the patience to fix the cursed bugs we created together.
 
-See [THANKS.md](THANKS.md) for special acknowledgments.
+See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for special thanks.
 
 ## License
 
