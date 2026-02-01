@@ -1,5 +1,9 @@
 # Flappy Paratroopa
 
+<p align="center">
+  <img width="512" alt="Flappy Paratroopa" src="https://github.com/user-attachments/assets/e82e3c85-3b24-41d5-91cf-0f852de56a5d" />
+</p>
+
 **You've stomped hundreds of them. Now be one.**
 
 A Koopa Paratroopa escapes World 1-1 and finds itself in a familiar nightmare: endless pipes, one-hit deaths, and the cruel pull of gravity. Flap to survive. How far can you go?
