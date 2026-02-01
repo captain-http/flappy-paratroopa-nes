@@ -1,2 +1,2 @@
-; Flappy Bird for NES - Macros
-; (add as needed)
+; Flappy Paratroopa - A Flappy Bird clone for NES
+; macros.inc - Assembly macros

@@ -1,4 +1,4 @@
-; Flappy Bird for NES
+; Flappy Paratroopa - A Flappy Bird clone for NES
 ; main.asm - Entry point
 
 .include "nes.inc"
@@ -2216,7 +2216,7 @@ update_score_display:
 ; Title Text Drawing
 ;===============================================================================
 draw_title_text:
-    ; Title screen: TOP XXX / FLAPPY / PARATROOPA / 2026 / PRESS START
+    ; Title screen: TOP XXX / FLAPPY / PARATROOPA / PRESS START
     ; Alphabet: A=$20, B=$21, ... Z=$39
     ; BG Digits: 0=$50, 1=$51, ... 9=$59
     bit PPU_STATUS

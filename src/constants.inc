@@ -1,4 +1,5 @@
-; Flappy Bird for NES - Constants
+; Flappy Paratroopa - A Flappy Bird clone for NES
+; constants.inc - Game constants and zero page variables
 
 ; Zero page variables (8.8 fixed-point)
 bird_y_frac = $00       ; Bird Y position (fractional)
