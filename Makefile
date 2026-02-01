@@ -122,9 +122,17 @@ help:
 	@echo "  run      - Build and run in emulator"
 	@echo "  debug    - Build with debug symbols"
 	@echo "  info     - Show build information"
+	@echo "  release-notes - Print release notes with current version"
 	@echo "  help     - Show this help"
 	@echo ""
 	@echo "Requirements: cc65 toolchain (ca65, ld65)"
 
 .PHONY: rebuild
 rebuild: clean all
+
+# Generate release notes with current version
+.PHONY: release-notes
+release-notes:
+	@sed 's/v1\.0/$(VERSION)/g' RELEASE.md
+	@echo ""
+	@echo "--- Release filename: $(GAME_NAME) ($(REGION)) ($(VERSION)) (Unl).nes ---"
